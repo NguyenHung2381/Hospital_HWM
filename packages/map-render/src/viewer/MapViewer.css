@@ -1,0 +1,212 @@
+/*
+ * Có thể tuỳ biến bằng CSS variables từ app:
+ * --hwn-map-accent, --hwn-map-surface, --hwn-map-text, --hwn-map-border
+ */
+.hwn-map-viewer {
+  --_accent: var(--hwn-map-accent, #0f766e);
+  --_surface: var(--hwn-map-surface, rgb(255 255 255 / 0.94));
+  --_text: var(--hwn-map-text, #0f172a);
+  --_border: var(--hwn-map-border, rgb(15 23 42 / 0.12));
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 240px;
+  overflow: hidden;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .hwn-map-viewer {
+    --_accent: var(--hwn-map-accent, #14b8a6);
+    --_surface: var(--hwn-map-surface, rgb(17 24 39 / 0.94));
+    --_text: var(--hwn-map-text, #e2e8f0);
+    --_border: var(--hwn-map-border, rgb(226 232 240 / 0.14));
+  }
+}
+
+.hwn-map-empty,
+.hwn-map-loading {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--_text);
+  opacity: 0.7;
+}
+
+.hwn-map-viewer button {
+  font: inherit;
+  color: var(--_text);
+  background: var(--_surface);
+  border: 1px solid var(--_border);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.hwn-map-viewer button:focus-visible {
+  outline: 2px solid var(--_accent);
+  outline-offset: 2px;
+}
+
+.hwn-map-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: 64px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.hwn-map-toolbar > * {
+  pointer-events: auto;
+}
+
+.hwn-map-segmented {
+  display: inline-flex;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+}
+
+.hwn-map-segmented button {
+  min-width: 44px;
+  height: 36px;
+  padding: 0 12px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  border-radius: 0;
+}
+
+.hwn-map-segmented button + button {
+  border-left: none;
+}
+
+.hwn-map-segmented button.active,
+.hwn-map-floors button.active {
+  background: var(--_accent);
+  border-color: var(--_accent);
+  color: #fff;
+}
+
+.hwn-map-chip {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+}
+
+.hwn-map-floors {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+}
+
+.hwn-map-floors button {
+  position: relative;
+  width: 44px;
+  height: 40px;
+  font-weight: 700;
+  border-radius: 0;
+}
+
+.hwn-map-floors button + button {
+  border-top: none;
+}
+
+.hwn-map-floor-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f97316;
+}
+
+.hwn-map-zoom {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+}
+
+.hwn-map-zoom button {
+  width: 44px;
+  height: 40px;
+  font-size: 1.2rem;
+  border-radius: 0;
+}
+
+.hwn-map-zoom button + button {
+  border-top: none;
+}
+
+/* Kim la bàn: mũi đỏ chỉ hướng Bắc; nằm ngay trên nhóm nút thu phóng */
+.hwn-map-viewer .hwn-map-compass {
+  position: absolute;
+  right: 10px;
+  bottom: 142px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+}
+
+.hwn-map-viewer .hwn-map-compass:disabled {
+  cursor: default;
+}
+
+.hwn-map-viewer .hwn-map-compass.active {
+  border-color: var(--_accent);
+  box-shadow: 0 0 0 2px var(--_accent);
+}
+
+.hwn-map-compass svg {
+  transition: transform 0.2s;
+}
+
+.hwn-map-compass-n {
+  position: absolute;
+  font-size: 9px;
+  font-weight: 800;
+  color: #dc2626;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.hwn-map-floor-name {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--_surface);
+  color: var(--_text);
+  border: 1px solid var(--_border);
+  font-weight: 600;
+  font-size: 0.85rem;
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+}

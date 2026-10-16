@@ -1,0 +1,100 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "user",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@hwn/user"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "admin",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@hwn/admin"
+      ],
+      "port": 5174
+    },
+    {
+      "name": "user-alt",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@hwn/user",
+        "--",
+        "--port",
+        "5183"
+      ],
+      "port": 5183
+    },
+    {
+      "name": "admin-alt",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@hwn/admin",
+        "--",
+        "--port",
+        "5184"
+      ],
+      "port": 5184
+    },
+    {
+      "name": "admin-3",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@hwn/admin",
+        "--",
+        "--port",
+        "5194",
+        "--strictPort"
+      ],
+      "port": 5194
+    },
+    {
+      "name": "admin-ext",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@hwn/admin",
+        "--",
+        "--port",
+        "5214",
+        "--strictPort"
+      ],
+      "port": 5214
+    },
+    {
+      "name": "user-ext",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@hwn/user",
+        "--",
+        "--port",
+        "5213",
+        "--strictPort"
+      ],
+      "port": 5213
+    }
+  ]
+}

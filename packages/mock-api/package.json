@@ -1,0 +1,19 @@
+{
+  "name": "@hwn/mock-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mock server (MSW) cho HWN — cho phép phát triển client khi chưa có backend",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./browser": "./src/browser.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@hwn/api-client": "*",
+    "@hwn/map-core": "*",
+    "msw": "^2.15.0"
+  }
+}

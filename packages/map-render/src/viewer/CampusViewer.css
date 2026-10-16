@@ -1,0 +1,96 @@
+/* Bản đồ cơ sở — dùng chung biến màu và nút với MapViewer.css. */
+
+.hwn-campus-legend-wrap {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: calc(100% - 80px);
+}
+
+.hwn-campus-legend {
+  margin: 0;
+  padding: 8px 10px;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--_border);
+  border-radius: 10px;
+  background: var(--_surface);
+  color: var(--_text);
+  font-size: 0.78rem;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+}
+
+.hwn-campus-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.hwn-campus-swatch {
+  flex: none;
+  width: 16px;
+  height: 12px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+
+.hwn-campus-swatch.line {
+  height: 0;
+  border-width: 0 0 4px;
+  border-radius: 2px;
+}
+
+/* Dốc: dải màu của khu phục vụ (màu chữ) với vạch sáng. */
+.hwn-campus-swatch.line.ramp {
+  height: 8px;
+  border-width: 0;
+  background: repeating-linear-gradient(90deg, currentColor 0 4px, rgb(255 255 255 / 0.7) 4px 6px);
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+
+/* Lối đi bộ: gạch lát. */
+.hwn-campus-swatch.line.paving {
+  height: 6px;
+  border: 1px solid #a8916f;
+  background: repeating-linear-gradient(90deg, #d9c6a5 0 3px, #bfa77f 3px 4px);
+}
+
+/* Lối có mái che: gạch lát dưới tấm mái. */
+.hwn-campus-swatch.line.covered {
+  height: 8px;
+  border: 2px solid #f59e0b;
+  background: #d9c6a5;
+}
+
+/* Đường chung: lòng đường xám, vỉa hè hai bên. */
+.hwn-campus-swatch.line.shared {
+  height: 10px;
+  border: 0;
+  background: linear-gradient(
+    #d9c6a5 0 25%,
+    #e5e7eb 25% 32%,
+    #6b7280 32% 68%,
+    #e5e7eb 68% 75%,
+    #d9c6a5 75%
+  );
+}
+
+/* Hàng rào. */
+.hwn-campus-swatch.line.fence {
+  border-width: 0 0 3px;
+  border-bottom-style: dotted;
+}
+
+.hwn-campus-swatch.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}

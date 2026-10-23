@@ -13,6 +13,7 @@
 import {
   boundsOf,
   distance,
+  furniturePolygon,
   pointInPolygon,
   pointOnWall,
   polygonCentroid,
@@ -462,6 +463,23 @@ export function generateNavGraph(floor: Floor, options: NavGenOptions = {}): Nav
     }
   }
 
+  // Nội thất (giường, ghế chờ, quầy…) cũng chặn đường đi như tường, kèm khoảng hở để lách qua.
+  const furnished = new Uint8Array(N);
+  for (const f of floor.furniture ?? []) {
+    const poly = furniturePolygon(f, -opts.clearance);
+    const b = boundsOf(poly)!;
+    const { i0, j0, i1, j1 } = cellRange(g, b.minX, b.minY, b.maxX, b.maxY);
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const k = j * g.W + i;
+        if (pointInPolygon(cellCenter(g, k), poly)) {
+          blocked[k] = 1;
+          furnished[k] = 1;
+        }
+      }
+    }
+  }
+
   // 2. Ngoài toà nhà: loang từ viền lưới.
   const outside = new Uint8Array(N);
   const queue: number[] = [];
@@ -520,11 +538,12 @@ export function generateNavGraph(floor: Floor, options: NavGenOptions = {}): Nav
   const roomNode = (room: Room) => {
     let id = roomNodes.get(room.id);
     if (!id) {
-      // Ưu tiên điểm đích đến do admin đặt; không có thì lấy điểm gần tâm phòng.
+      // Ưu tiên điểm đích đến do admin đặt; không có thì lấy điểm gần tâm phòng (tránh nội thất).
       const c = polygonCentroid(room.polygon);
+      const free = pointInPolygon(c, room.polygon) && !furnished[cellIndex(g, c)];
       const p =
         roomDestination(room) ??
-        (pointInPolygon(c, room.polygon) ? c : (interiorPoint(room.polygon, g, occupied) ?? c));
+        (free ? c : (interiorPoint(room.polygon, g, occupied, blocked) ?? c));
       id = graph.addNode('room', p, room.id).id;
       roomNodes.set(room.id, id);
     }
@@ -613,8 +632,20 @@ export function generateNavGraph(floor: Floor, options: NavGenOptions = {}): Nav
   return { graph: graph.toNavGraph(), warnings };
 }
 
-/** Một điểm chắc chắn nằm trong đa giác (ô lưới gần trọng tâm nhất). */
-function interiorPoint(polygon: Point[], g: Grid, occupied: Uint8Array): Point | null {
+/** Ô lưới chứa điểm `p` (-1 nếu ngoài lưới). */
+function cellIndex(g: Grid, p: Point): number {
+  const i = Math.floor((p.x - g.minX) / g.cs);
+  const j = Math.floor((p.y - g.minY) / g.cs);
+  return i < 0 || j < 0 || i >= g.W || j >= g.H ? -1 : j * g.W + i;
+}
+
+/** Một điểm chắc chắn nằm trong đa giác (ô lưới trống gần trọng tâm nhất, không bị `blocked`). */
+function interiorPoint(
+  polygon: Point[],
+  g: Grid,
+  occupied: Uint8Array,
+  blocked: Uint8Array,
+): Point | null {
   const c = polygonCentroid(polygon);
   const b = boundsOf(polygon);
   if (!b) return null;
@@ -623,7 +654,7 @@ function interiorPoint(polygon: Point[], g: Grid, occupied: Uint8Array): Point |
   for (let j = j0; j <= j1; j++) {
     for (let i = i0; i <= i1; i++) {
       const k = j * g.W + i;
-      if (!occupied[k]) continue;
+      if (!occupied[k] || blocked[k]) continue;
       const p = cellCenter(g, k);
       if (pointInPolygon(p, polygon) && (!best || distance(p, c) < distance(best, c))) best = p;
     }

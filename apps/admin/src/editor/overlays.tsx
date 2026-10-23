@@ -22,7 +22,7 @@ import {
   withAlpha,
   type MapTheme,
 } from '@hwn/map-render';
-import type { OpeningPlacement } from './ops';
+import { annotationPoints, furnitureCorners, type OpeningPlacement } from './ops';
 import type { SnapKind } from './snap';
 import type { ItemRef } from './types';
 
@@ -191,6 +191,46 @@ export function SelectionOverlay({
           radius={px(17)}
           stroke={color}
           strokeWidth={strong ? 3 : 2}
+          strokeScaleEnabled={false}
+        />
+      );
+    }
+    if (ref.type === 'furniture') {
+      const f = floor.furniture?.find((x) => x.id === ref.id);
+      if (!f) return null;
+      return (
+        <Line
+          key={key}
+          points={flattenPoints(furnitureCorners(f))}
+          closed
+          stroke={color}
+          strokeWidth={width}
+          strokeScaleEnabled={false}
+        />
+      );
+    }
+    if (ref.type === 'annotation') {
+      const a = floor.annotations?.find((x) => x.id === ref.id);
+      if (!a) return null;
+      const pts = annotationPoints(a);
+      return a.kind === 'text' ? (
+        <Line
+          key={key}
+          points={flattenPoints(pts)}
+          closed
+          stroke={color}
+          strokeWidth={width}
+          dash={[px(5), px(3)]}
+          strokeScaleEnabled={false}
+        />
+      ) : (
+        <Line
+          key={key}
+          points={flattenPoints(pts.slice(2))}
+          stroke={color}
+          strokeWidth={strong ? 6 : 5}
+          lineCap="round"
+          opacity={0.6}
           strokeScaleEnabled={false}
         />
       );

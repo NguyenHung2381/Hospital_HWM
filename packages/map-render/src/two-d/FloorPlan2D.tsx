@@ -36,6 +36,7 @@ import {
   RouteLayer,
   Walls,
 } from './layers';
+import { FurnitureLayer } from './furniture';
 import { MapStage, type MapStageHandle } from './MapStage';
 import { SiteGround, sitePlanBounds } from './siteLayers';
 
@@ -226,6 +227,9 @@ export function FloorPlan2D({
           onRoomClick={onRoomClick}
         />
         <Connectors connectors={floor.connectors} theme={theme} />
+        {floor.furniture && floor.furniture.length > 0 && (
+          <FurnitureLayer furniture={floor.furniture} theme={theme} />
+        )}
         <Walls floor={floor} theme={theme} />
       </Layer>
       <Layer listening={false}>

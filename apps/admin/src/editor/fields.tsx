@@ -1,4 +1,11 @@
-import { useState, type ReactNode } from 'react';
+import {
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FocusEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react';
 
 const round = (v: number, precision: number) =>
   String(Math.round(v * 10 ** precision) / 10 ** precision);
@@ -29,8 +36,15 @@ export function NumberField({
   disabled?: boolean;
 }) {
   const [text, setText] = useState<string | null>(null);
+  // Esc gọi blur() ngay trong handler, lúc đó onBlur vẫn thấy giá trị đang gõ — cờ này để bỏ qua.
+  const cancelled = useRef(false);
 
   const commit = () => {
+    if (cancelled.current) {
+      cancelled.current = false;
+      setText(null);
+      return;
+    }
     if (text === null) return;
     const parsed = Number.parseFloat(text.replace(',', '.'));
     setText(null);
@@ -60,7 +74,7 @@ export function NumberField({
               commit();
               e.currentTarget.blur();
             } else if (e.key === 'Escape') {
-              setText(null);
+              cancelled.current = true;
               e.currentTarget.blur();
             }
           }}
@@ -77,37 +91,56 @@ export function TextField({
   onCommit,
   allowEmpty = false,
   placeholder,
+  multiline = false,
+  autoFocus = false,
 }: {
   label: string;
   value: string;
   onCommit: (v: string) => void;
   allowEmpty?: boolean;
   placeholder?: string;
+  /** Ô nhiều dòng: Shift+Enter xuống dòng, Enter để ghi. */
+  multiline?: boolean;
+  /** Focus và bôi đen sẵn nội dung khi hiện ra. */
+  autoFocus?: boolean;
 }) {
   const [text, setText] = useState<string | null>(null);
+  const cancelled = useRef(false);
   const commit = () => {
+    if (cancelled.current) {
+      cancelled.current = false;
+      setText(null);
+      return;
+    }
     if (text === null) return;
     const v = text.trim();
     setText(null);
     if ((v || allowEmpty) && v !== value) onCommit(v);
   };
+  const props = {
+    value: text ?? value,
+    placeholder,
+    autoFocus,
+    onFocus: autoFocus
+      ? (e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => e.currentTarget.select()
+      : undefined,
+    onChange: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setText(e.target.value),
+    onBlur: commit,
+    onKeyDown: (e: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (e.key === 'Enter' && !(multiline && e.shiftKey)) {
+        e.preventDefault();
+        e.currentTarget.blur();
+      } else if (e.key === 'Escape') {
+        cancelled.current = true;
+        e.currentTarget.blur();
+      }
+    },
+  };
   return (
     <label className="pf">
       <span className="pf-label">{label}</span>
       <span className="pf-input">
-        <input
-          value={text ?? value}
-          placeholder={placeholder}
-          onChange={(e) => setText(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') e.currentTarget.blur();
-            else if (e.key === 'Escape') {
-              setText(null);
-              e.currentTarget.blur();
-            }
-          }}
-        />
+        {multiline ? <textarea rows={3} {...props} /> : <input {...props} />}
       </span>
     </label>
   );

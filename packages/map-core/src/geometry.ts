@@ -1,4 +1,4 @@
-import type { Point, Wall } from './types';
+import type { Furniture, Point, Wall } from './types';
 
 export const EPSILON = 1e-9;
 
@@ -330,4 +330,50 @@ export function smoothPolyline(points: readonly Point[], iterations = 3): Point[
     pts = next;
   }
   return pts;
+}
+
+/* ------------------------------------------------------------------ */
+/* Nội thất làm vật cản                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Hình chữ nhật chiếm chỗ của nội thất (theo góc xoay). `inset` > 0 thu nhỏ mỗi phía, < 0 nới rộng
+ * (vd. thêm khoảng hở để đi qua).
+ */
+export function furniturePolygon(
+  f: Pick<Furniture, 'position' | 'width' | 'depth' | 'rotation'>,
+  inset = 0,
+): Point[] {
+  const hw = Math.max(f.width / 2 - inset, 0);
+  const hd = Math.max(f.depth / 2 - inset, 0);
+  const { x, y } = f.position;
+  return [
+    { x: x - hw, y: y - hd },
+    { x: x + hw, y: y - hd },
+    { x: x + hw, y: y + hd },
+    { x: x - hw, y: y + hd },
+  ].map((p) => rotatePoint(p, f.position, f.rotation ?? 0));
+}
+
+/** Đoạn `a`–`b` cắt qua (hoặc nằm trong) đa giác. */
+export function segmentHitsPolygon(a: Point, b: Point, polygon: readonly Point[]): boolean {
+  if (pointInPolygon(a, polygon) || pointInPolygon(b, polygon)) return true;
+  return polygon.some(
+    (p, i) => segmentIntersection(a, b, p, polygon[(i + 1) % polygon.length]!) !== null,
+  );
+}
+
+/**
+ * Đi sát mép nội thất (vd. dọc dãy ghế kê sát tường) không tính là xuyên qua: thu nhỏ hình nội thất
+ * chừng này mỗi phía khi kiểm tra.
+ */
+const FURNITURE_GRAZE = 0.05;
+
+/** Nội thất đầu tiên mà đoạn `a`–`b` đi xuyên qua (nếu có). */
+export function furnitureAcross(
+  furniture: readonly Furniture[] | undefined,
+  a: Point,
+  b: Point,
+): Furniture | undefined {
+  return furniture?.find((f) => segmentHitsPolygon(a, b, furniturePolygon(f, FURNITURE_GRAZE)));
 }

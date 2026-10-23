@@ -47,6 +47,8 @@ import {
 import { saveAll, useSaveStatus } from '../editor/draft';
 import { EditorCanvas, type CanvasCampus, type EditorStageHandle } from '../editor/EditorCanvas';
 import { NumberField, Panel, TextField } from '../editor/fields';
+import { useFloor3DEditor } from '../editor/edit3d';
+import { ExportMenu } from '../editor/ExportMenu';
 import { FloorBar } from '../editor/FloorBar';
 import { HelpDialog } from '../editor/HelpDialog';
 import { IssuesPanel } from '../editor/IssuesPanel';
@@ -133,6 +135,10 @@ function locate(building: Building, floorId: string, id: string): { ref?: ItemRe
   if (connector) return { ref: { type: 'connector', id }, at: polygonCentroid(connector.polygon) };
   const room = floor.rooms.find((r) => r.id === id);
   if (room) return { ref: { type: 'room', id }, at: polygonCentroid(room.polygon) };
+  const furniture = floor.furniture?.find((f) => f.id === id);
+  if (furniture) return { ref: { type: 'furniture', id }, at: furniture.position };
+  const landmark = floor.landmarks?.find((l) => l.id === id);
+  if (landmark) return { ref: { type: 'landmark', id }, at: landmark.position };
   const node = floor.navGraph.nodes.find((n) => n.id === id);
   return node ? { ref: { type: 'navNode', id }, at: node.position } : {};
 }
@@ -208,6 +214,7 @@ export function MapEditorPage({ mode }: { mode: MapLayer }) {
 
   const building = useEditor((s) => s.building);
   const show3d = useEditor((s) => s.settings.show3d);
+  const editor3d = useFloor3DEditor();
   const gridUnit = useEditor((s) => s.settings.gridUnit);
   const floor = useCurrentFloor();
   const { setSettings, setFloor, select } = useEditor.getState();
@@ -871,6 +878,7 @@ export function MapEditorPage({ mode }: { mode: MapLayer }) {
           >
             Xem 3D
           </button>
+          {mode === 'building' && <ExportMenu />}
           <button
             type="button"
             className="btn btn-sm btn-danger"
@@ -977,9 +985,10 @@ export function MapEditorPage({ mode }: { mode: MapLayer }) {
                     departments={building.departments}
                     level={floor.level}
                     focusBuildingId={building.id}
+                    editor={editor3d}
                   />
                 ) : (
-                  <Building3D building={building} floorIds={[floor.id]} />
+                  <Building3D building={building} floorIds={[floor.id]} editor={editor3d} />
                 )}
               </Suspense>
             </div>

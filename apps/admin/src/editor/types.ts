@@ -1,6 +1,8 @@
 import type {
+  Annotation,
   Connector,
   ConnectorType,
+  Furniture,
   Id,
   Landmark,
   Opening,
@@ -26,6 +28,9 @@ export type Tool =
   | 'navNode'
   | 'navEdge'
   | 'measure'
+  | 'dimension'
+  | 'text'
+  | 'furniture'
   | 'calibrate';
 
 export const OPENING_TOOLS = {
@@ -44,7 +49,58 @@ export const isOpeningTool = (t: Tool): t is keyof typeof OPENING_TOOLS => t in 
 export const isConnectorTool = (t: Tool): t is keyof typeof CONNECTOR_TOOLS => t in CONNECTOR_TOOLS;
 
 export type ItemType =
-  'wall' | 'opening' | 'connector' | 'room' | 'landmark' | 'navNode' | 'navEdge';
+  | 'wall'
+  | 'opening'
+  | 'connector'
+  | 'room'
+  | 'landmark'
+  | 'annotation'
+  | 'furniture'
+  | 'navNode'
+  | 'navEdge';
+
+/** Lớp bản vẽ: ẩn (không vẽ, không chọn được) hoặc khoá (vẫn vẽ, không chọn / sửa được). */
+export type LayerId = 'walls' | 'rooms' | 'connectors' | 'landmarks' | 'furniture' | 'annotations';
+
+export const LAYERS: readonly { id: LayerId; label: string }[] = [
+  { id: 'walls', label: 'Tường & cửa' },
+  { id: 'rooms', label: 'Phòng' },
+  { id: 'connectors', label: 'Thang' },
+  { id: 'landmarks', label: 'Mốc' },
+  { id: 'furniture', label: 'Nội thất & thiết bị' },
+  { id: 'annotations', label: 'Kích thước & chữ' },
+];
+
+/** Lớp chứa từng loại đối tượng (đồ thị đi lại có nút ẩn / hiện riêng). */
+export const LAYER_OF: Record<ItemType, LayerId | null> = {
+  wall: 'walls',
+  opening: 'walls',
+  connector: 'connectors',
+  room: 'rooms',
+  landmark: 'landmarks',
+  annotation: 'annotations',
+  furniture: 'furniture',
+  navNode: null,
+  navEdge: null,
+};
+
+/** Lớp mà công cụ vẽ tạo đối tượng vào. */
+export const TOOL_LAYER: Partial<Record<Tool, LayerId>> = {
+  wall: 'walls',
+  wallRect: 'walls',
+  door: 'walls',
+  window: 'walls',
+  entrance: 'walls',
+  elevator: 'connectors',
+  stairs: 'connectors',
+  escalator: 'connectors',
+  room: 'rooms',
+  roomAuto: 'rooms',
+  landmark: 'landmarks',
+  dimension: 'annotations',
+  text: 'annotations',
+  furniture: 'furniture',
+};
 
 /** Công cụ làm việc với đồ thị đi lại — khi dùng thì luôn hiện đồ thị. */
 export const isNavTool = (t: Tool) => t === 'navNode' || t === 'navEdge';
@@ -69,6 +125,8 @@ export interface Clipboard {
   connectors: Connector[];
   rooms: Room[];
   landmarks: Landmark[];
+  annotations: Annotation[];
+  furniture: Furniture[];
 }
 
 export interface EditorSettings {
@@ -87,6 +145,10 @@ export interface EditorSettings {
   showNavGraph: boolean;
   showBackground: boolean;
   show3d: boolean;
+  /** Lớp đang ẩn. */
+  hiddenLayers: LayerId[];
+  /** Lớp đang khoá. */
+  lockedLayers: LayerId[];
 }
 
 /** Các lựa chọn cạnh ô lưới lớn (m). */
@@ -103,4 +165,6 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   showNavGraph: false,
   showBackground: true,
   show3d: false,
+  hiddenLayers: [],
+  lockedLayers: [],
 };

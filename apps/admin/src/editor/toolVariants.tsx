@@ -3,10 +3,18 @@ import {
   LANDMARK_KINDS,
   type DoorStyle,
   type ElevatorKind,
+  type FurnitureKind,
   type LandmarkKind,
   type WallKind,
 } from '@hwn/map-core';
-import { DOOR_STYLES, ELEVATOR_KINDS, WALL_KINDS } from '@hwn/map-render';
+import {
+  DOOR_STYLES,
+  ELEVATOR_KINDS,
+  WALL_KINDS,
+  FURNITURE,
+  FURNITURE_KINDS,
+} from '@hwn/map-render';
+import { FurnitureIcon } from './furnitureMarks';
 import { DOOR_STYLE_WIDTH, ELEVATOR_KIND_SIZE, WALL_KIND_DEFAULTS } from './ops';
 import type { EditorState } from './store';
 import { DOOR_STYLE_ICONS, ELEVATOR_KIND_ICONS, landmarkIcon, WALL_KIND_ICONS } from './tools';
@@ -85,6 +93,21 @@ export const TOOL_VARIANTS: Partial<Record<Tool, ToolVariantMenu>> = {
     })),
     current: (s) => s.landmarkKind,
     pick: (s, v) => s.setLandmarkKind(v as LandmarkKind),
+    showsCurrentIcon: true,
+  },
+  furniture: {
+    title: 'Thư viện ký hiệu',
+    options: FURNITURE_KINDS.map((value) => {
+      const d = FURNITURE[value];
+      return {
+        value,
+        label: d.label,
+        detail: `${d.width.toLocaleString('vi-VN')} × ${m(d.depth)}`,
+        icon: <FurnitureIcon kind={value} />,
+      };
+    }),
+    current: (s) => s.furnitureKind,
+    pick: (s, v) => s.setFurnitureKind(v as FurnitureKind),
     showsCurrentIcon: true,
   },
 };

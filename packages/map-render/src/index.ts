@@ -26,6 +26,7 @@ export {
   type CampusUnderlayProps,
 } from './two-d/campusContext';
 export * from './two-d/layers';
+export { FurnitureLayer, FurnitureMark } from './two-d/furniture';
 export {
   SiteBuildings,
   siteBuildingAt,
@@ -58,3 +59,4 @@ export { MapViewer, shortFloorLabel, type MapViewerProps } from './viewer/MapVie
 export * from './core/doors';
 export * from './core/connectors';
 export * from './core/landmarks';
+export * from './core/furniture';

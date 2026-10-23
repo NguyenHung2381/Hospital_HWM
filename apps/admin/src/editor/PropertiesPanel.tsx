@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   add,
@@ -9,10 +9,13 @@ import {
   scale,
   sub,
   wallLength,
+  type Annotation,
   type Connector,
   type ConnectorDirection,
   type ConnectorType,
   type Floor,
+  type Furniture,
+  type FurnitureKind,
   type Landmark,
   type LandmarkKind,
   type Opening,
@@ -28,25 +31,33 @@ import {
   nextDoorOrientation,
   WALL_KINDS,
   wallKindOf,
+  FURNITURE,
+  FURNITURE_KINDS,
 } from '@hwn/map-render';
 import { errorMessage } from '../lib/api';
 import { removeBuilding } from '../lib/buildingActions';
 import { useBuildings } from '../lib/queries';
 import { BuildingHeightFields } from './BuildingHeightFields';
 import { CheckField, NumberField, Panel, SelectField, TextField } from './fields';
+import { dxfToBackground, parseDxf } from './dxf';
+import { normalizeAngle } from './furniture';
 import { readImageAsDataUrl } from './image';
-import { GRID_UNITS } from './types';
+import { GRID_UNITS, LAYERS, type LayerId } from './types';
 import { NavEdgePanel, NavGraphPanel, NavNodePanel, RoomPanel } from './RoomNavPanels';
 import {
   calibrateBackground,
   clampOpenings,
   cloneConnectorToFloors,
   connectorRect,
+  DEFAULT_NOTE_TEXT,
+  dimensionLine,
   endpointsAt,
   OPENING_DEFAULTS,
   removeFloor,
   setConnectorSize,
   setEndpoints,
+  uprightAngle,
+  type AlignMode,
   WALL_KIND_DEFAULTS,
 } from './ops';
 import { useCurrentFloor, useEditor } from './store';
@@ -98,6 +109,144 @@ export const TransformButtons = () => (
     >
       ⇵ Lật dọc
     </button>
+  </div>
+);
+
+/** Biểu tượng 16×16 cho nút căn chỉnh: `bars` là các thanh [x, y, rộng, cao], `guide` là đường căn. */
+const alignIcon = (
+  bars: [number, number, number, number][],
+  guide: [number, number, number, number],
+) => (
+  <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
+    <line
+      x1={guide[0]}
+      y1={guide[1]}
+      x2={guide[2]}
+      y2={guide[3]}
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    {bars.map(([x, y, w, h], i) => (
+      <rect key={i} x={x} y={y} width={w} height={h} rx="1" fill="currentColor" opacity="0.6" />
+    ))}
+  </svg>
+);
+
+const ALIGN_BUTTONS: { mode: AlignMode; title: string; icon: ReactNode }[] = [
+  {
+    mode: 'left',
+    title: 'Căn mép trái',
+    icon: alignIcon(
+      [
+        [3, 3, 9, 3],
+        [3, 10, 6, 3],
+      ],
+      [2, 1, 2, 15],
+    ),
+  },
+  {
+    mode: 'centerX',
+    title: 'Căn giữa theo chiều ngang',
+    icon: alignIcon(
+      [
+        [3, 3, 10, 3],
+        [5, 10, 6, 3],
+      ],
+      [8, 1, 8, 15],
+    ),
+  },
+  {
+    mode: 'right',
+    title: 'Căn mép phải',
+    icon: alignIcon(
+      [
+        [4, 3, 9, 3],
+        [7, 10, 6, 3],
+      ],
+      [14, 1, 14, 15],
+    ),
+  },
+  {
+    mode: 'top',
+    title: 'Căn mép trên',
+    icon: alignIcon(
+      [
+        [3, 3, 3, 9],
+        [10, 3, 3, 6],
+      ],
+      [1, 2, 15, 2],
+    ),
+  },
+  {
+    mode: 'centerY',
+    title: 'Căn giữa theo chiều dọc',
+    icon: alignIcon(
+      [
+        [3, 3, 3, 10],
+        [10, 5, 3, 6],
+      ],
+      [1, 8, 15, 8],
+    ),
+  },
+  {
+    mode: 'bottom',
+    title: 'Căn mép dưới',
+    icon: alignIcon(
+      [
+        [3, 4, 3, 9],
+        [10, 7, 3, 6],
+      ],
+      [1, 14, 15, 14],
+    ),
+  },
+];
+
+/** Căn chỉnh (≥ 2 đối tượng) và chia đều khoảng cách (≥ 3 đối tượng). */
+const AlignButtons = ({ count }: { count: number }) => (
+  <div className="pf-block">
+    <span className="pf-label">Căn chỉnh</span>
+    <div className="btn-row">
+      {ALIGN_BUTTONS.map((b) => (
+        <button
+          key={b.mode}
+          type="button"
+          className="btn btn-sm btn-icon"
+          title={b.title}
+          aria-label={b.title}
+          onClick={() => editorCommands.align(b.mode)}
+        >
+          {b.icon}
+        </button>
+      ))}
+    </div>
+    <div className="btn-row">
+      <button
+        type="button"
+        className="btn btn-sm"
+        disabled={count < 3}
+        title={
+          count < 3
+            ? 'Cần chọn từ 3 đối tượng'
+            : 'Khoảng hở giữa các đối tượng bằng nhau theo chiều ngang'
+        }
+        onClick={() => editorCommands.distribute('x')}
+      >
+        ⇹ Chia đều ngang
+      </button>
+      <button
+        type="button"
+        className="btn btn-sm"
+        disabled={count < 3}
+        title={
+          count < 3
+            ? 'Cần chọn từ 3 đối tượng'
+            : 'Khoảng hở giữa các đối tượng bằng nhau theo chiều dọc'
+        }
+        onClick={() => editorCommands.distribute('y')}
+      >
+        ⇳ Chia đều dọc
+      </button>
+    </div>
   </div>
 );
 
@@ -506,6 +655,298 @@ function LandmarkPanel({ landmark }: { landmark: Landmark }) {
 
 /* ------------------------------------------------------------------ */
 
+function AnnotationPanel({ annotation }: { annotation: Annotation }) {
+  const edit = useEditor((s) => s.edit);
+  const patch = (recipe: (a: Annotation) => void) =>
+    edit((_, f) => {
+      const a = f.annotations?.find((x) => x.id === annotation.id);
+      if (a) recipe(a);
+    });
+
+  if (annotation.kind === 'dimension') {
+    const dim = annotation;
+    const setPoint = (which: 'start' | 'end', p: { x: number; y: number }) =>
+      patch((a) => {
+        if (a.kind === 'dimension') a[which] = p;
+      });
+    return (
+      <Panel title="Đường kích thước" actions={<DeleteButton />}>
+        <NumberField
+          label="Chiều dài đo được"
+          value={dimensionLine(dim).length}
+          disabled
+          onCommit={() => {}}
+        />
+        <NumberField
+          label="Khoảng cách tới đoạn đo"
+          value={dim.offset}
+          step={0.1}
+          onCommit={(v) =>
+            patch((a) => {
+              if (a.kind === 'dimension') a.offset = v;
+            })
+          }
+        />
+        <div className="pf-grid">
+          <NumberField
+            label="Đầu X"
+            value={dim.start.x}
+            onCommit={(x) => setPoint('start', { ...dim.start, x })}
+          />
+          <NumberField
+            label="Đầu Y"
+            value={dim.start.y}
+            onCommit={(y) => setPoint('start', { ...dim.start, y })}
+          />
+          <NumberField
+            label="Cuối X"
+            value={dim.end.x}
+            onCommit={(x) => setPoint('end', { ...dim.end, x })}
+          />
+          <NumberField
+            label="Cuối Y"
+            value={dim.end.y}
+            onCommit={(y) => setPoint('end', { ...dim.end, y })}
+          />
+        </div>
+        <p className="muted small">
+          Khoảng cách âm = đặt đường kích thước sang phía bên kia. Kéo để di chuyển cả đường kích
+          thước.
+        </p>
+      </Panel>
+    );
+  }
+
+  const note = annotation;
+  const patchText = (p: Partial<typeof note>) =>
+    patch((a) => {
+      if (a.kind === 'text') Object.assign(a, p);
+    });
+  return (
+    <Panel title="Chú thích chữ" actions={<DeleteButton />}>
+      <TextField
+        label="Nội dung (Shift+Enter để xuống dòng)"
+        value={note.text}
+        multiline
+        autoFocus={note.text === DEFAULT_NOTE_TEXT}
+        onCommit={(text) => patchText({ text })}
+      />
+      <div className="pf-grid">
+        <NumberField
+          label="Cỡ chữ"
+          value={note.size}
+          min={0.1}
+          max={20}
+          step={0.1}
+          onCommit={(size) => patchText({ size })}
+        />
+        <NumberField
+          label="Góc xoay"
+          value={note.rotation ?? 0}
+          step={15}
+          precision={1}
+          unit="°"
+          onCommit={(v) =>
+            patch((a) => {
+              if (a.kind !== 'text') return;
+              const rotation = uprightAngle(v);
+              if (rotation) a.rotation = rotation;
+              else delete a.rotation;
+            })
+          }
+        />
+        <NumberField
+          label="X"
+          value={note.position.x}
+          onCommit={(x) => patchText({ position: { ...note.position, x } })}
+        />
+        <NumberField
+          label="Y"
+          value={note.position.y}
+          onCommit={(y) => patchText({ position: { ...note.position, y } })}
+        />
+      </div>
+      <p className="muted small">
+        Cỡ chữ tính theo mét nên chữ to / nhỏ cùng bản vẽ. Chỉ hiện trong editor, không hiện ở app
+        người dùng.
+      </p>
+    </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+const FURNITURE_OPTIONS = FURNITURE_KINDS.map((value) => ({
+  value,
+  label: FURNITURE[value].label,
+}));
+
+function FurniturePanel({ item }: { item: Furniture }) {
+  const edit = useEditor((s) => s.edit);
+  const patch = (p: Partial<Furniture>) =>
+    edit((_, f) => {
+      const x = f.furniture?.find((y) => y.id === item.id);
+      if (!x) return;
+      Object.assign(x, p);
+      if (!x.rotation) delete x.rotation;
+    });
+  const def = FURNITURE[item.kind];
+  const custom = item.width !== def.width || item.depth !== def.depth;
+  return (
+    <Panel title={def.label} actions={<DeleteButton />}>
+      <SelectField
+        label="Ký hiệu"
+        value={item.kind}
+        options={FURNITURE_OPTIONS}
+        // Đổi ký hiệu thì lấy kích thước mặc định của ký hiệu mới.
+        onChange={(kind: FurnitureKind) =>
+          patch({ kind, width: FURNITURE[kind].width, depth: FURNITURE[kind].depth })
+        }
+      />
+      <div className="pf-grid">
+        <NumberField
+          label="Bề ngang"
+          value={item.width}
+          min={0.1}
+          max={20}
+          step={0.05}
+          onCommit={(width) => patch({ width })}
+        />
+        <NumberField
+          label="Chiều sâu"
+          value={item.depth}
+          min={0.1}
+          max={20}
+          step={0.05}
+          onCommit={(depth) => patch({ depth })}
+        />
+        <NumberField
+          label="Góc xoay"
+          value={item.rotation ?? 0}
+          step={15}
+          precision={1}
+          unit="°"
+          onCommit={(v) => patch({ rotation: normalizeAngle(v) })}
+        />
+        <div className="pf">
+          <span className="pf-label">Xoay nhanh</span>
+          <span className="pf-input">
+            <button
+              type="button"
+              className="btn btn-sm"
+              title="Xoay ngược 90°"
+              onClick={() => patch({ rotation: normalizeAngle((item.rotation ?? 0) - 90) })}
+            >
+              ↺
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              title="Xoay 90°"
+              onClick={() => patch({ rotation: normalizeAngle((item.rotation ?? 0) + 90) })}
+            >
+              ↻
+            </button>
+          </span>
+        </div>
+        <NumberField
+          label="Tâm X"
+          value={item.position.x}
+          onCommit={(x) => patch({ position: { ...item.position, x } })}
+        />
+        <NumberField
+          label="Tâm Y"
+          value={item.position.y}
+          onCommit={(y) => patch({ position: { ...item.position, y } })}
+        />
+      </div>
+      {custom && (
+        <div className="btn-row">
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => patch({ width: def.width, depth: def.depth })}
+          >
+            Kích thước mặc định ({def.width} × {def.depth} m)
+          </button>
+        </div>
+      )}
+      <p className="muted small">
+        Kéo để di chuyển · Shift+R xoay 90° · Ctrl+D nhân bản (vd. xếp dãy giường). Chỉ hiện trong
+        editor và bản xuất, không ảnh hưởng chỉ đường.
+      </p>
+    </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+/** Ẩn (không vẽ, không chọn) hoặc khoá (vẫn vẽ, không chọn / sửa được) từng lớp bản vẽ. */
+function LayersPanel({ floor }: { floor: Floor }) {
+  const settings = useEditor((s) => s.settings);
+  const setSettings = useEditor((s) => s.setSettings);
+  const counts: Record<LayerId, number> = {
+    walls: floor.walls.length + floor.openings.length,
+    rooms: floor.rooms.length,
+    connectors: floor.connectors.length,
+    landmarks: floor.landmarks?.length ?? 0,
+    annotations: floor.annotations?.length ?? 0,
+    furniture: floor.furniture?.length ?? 0,
+  };
+  const toggle = (key: 'hiddenLayers' | 'lockedLayers', id: LayerId) => {
+    const list = settings[key];
+    const next = list.includes(id) ? list.filter((l) => l !== id) : [...list, id];
+    setSettings(key === 'hiddenLayers' ? { hiddenLayers: next } : { lockedLayers: next });
+  };
+  return (
+    <Panel title="Lớp">
+      <table className="layer-table">
+        <thead>
+          <tr>
+            <th scope="col">Lớp</th>
+            <th scope="col">Hiện</th>
+            <th scope="col">Khoá</th>
+          </tr>
+        </thead>
+        <tbody>
+          {LAYERS.map(({ id, label }) => {
+            const hidden = settings.hiddenLayers.includes(id);
+            return (
+              <tr key={id} className={hidden ? 'layer-hidden' : undefined}>
+                <th scope="row">
+                  {label} <span className="muted small">{counts[id]}</span>
+                </th>
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`Hiện lớp ${label}`}
+                    checked={!hidden}
+                    onChange={() => toggle('hiddenLayers', id)}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`Khoá lớp ${label}`}
+                    checked={settings.lockedLayers.includes(id)}
+                    onChange={() => toggle('lockedLayers', id)}
+                  />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="muted small">
+        Lớp khoá vẫn hiện và vẫn bắt dính được, nhưng không chọn, kéo hay xoá được. Chọn công cụ vẽ
+        của một lớp đang ẩn thì lớp đó tự hiện lại.
+      </p>
+    </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
 const NORTH_PRESETS = [
   { angle: 0, label: '↑', title: 'Bắc hướng lên trên' },
   { angle: 90, label: '→', title: 'Bắc hướng sang phải' },
@@ -699,12 +1140,48 @@ function BackgroundPanel({ floor }: { floor: Floor }) {
   const settings = useEditor((s) => s.settings);
   const setSettings = useEditor((s) => s.setSettings);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [opacity, setOpacity] = useState<number | null>(null);
   const bg = floor.background;
+
+  /** Bản vẽ CAD (DXF) → ảnh nền vector theo đúng kích thước thật. */
+  const uploadDxf = async (file: File) => {
+    const drawing = parseDxf(await file.text());
+    const result = dxfToBackground(drawing);
+    if (!result) {
+      setError(
+        'File DXF không có nét vẽ nào đọc được (chỉ đọc LINE, POLYLINE, CIRCLE, ARC, TEXT, block).',
+      );
+      return;
+    }
+    edit((_, f) => {
+      f.background = result.background;
+    });
+    setSettings({ showBackground: true });
+    setInfo(
+      `DXF: ${drawing.strokes.length} nét, ${drawing.labels.length} chữ · ` +
+        `${result.width.toFixed(1)} × ${result.height.toFixed(1)} m · đơn vị ${drawing.units}` +
+        (drawing.guessed
+          ? ' (file không ghi đơn vị — đoán theo kích thước; sai thì dùng Hiệu chỉnh tỉ lệ)'
+          : ''),
+    );
+  };
 
   const upload = async (file: File) => {
     try {
       setError(null);
+      setInfo(null);
+      const ext = file.name.toLowerCase().split('.').pop();
+      if (ext === 'dwg') {
+        setError(
+          'Chưa đọc được DWG. Mở bản vẽ trong AutoCAD → Save As → chọn định dạng DXF rồi tải lên.',
+        );
+        return;
+      }
+      if (ext === 'dxf') {
+        await uploadDxf(file);
+        return;
+      }
       const img = await readImageAsDataUrl(file);
       // Ước lượng ban đầu: ảnh rộng bằng 40 m — sau đó dùng công cụ hiệu chỉnh tỉ lệ cho chính xác.
       edit((_, f) => {
@@ -732,13 +1209,14 @@ function BackgroundPanel({ floor }: { floor: Floor }) {
       {!bg ? (
         <>
           <p className="muted small">
-            Tải ảnh bản vẽ/ảnh chụp mặt bằng để vẽ đè lên cho nhanh và chính xác.
+            Tải ảnh bản vẽ/ảnh chụp mặt bằng, hoặc file CAD (DXF) để vẽ đè lên cho nhanh và chính
+            xác. DXF giữ đúng tỉ lệ thật.
           </p>
           <label className="btn btn-sm">
-            Tải ảnh lên…
+            Tải ảnh / DXF lên…
             <input
               type="file"
-              accept="image/png,image/jpeg,image/webp"
+              accept="image/png,image/jpeg,image/webp,.dxf,.dwg"
               hidden
               onChange={(e) => {
                 const file = e.target.files?.[0];
@@ -820,6 +1298,7 @@ function BackgroundPanel({ floor }: { floor: Floor }) {
           </div>
         </>
       )}
+      {info && <p className="muted small">{info}</p>}
       {error && <p className="error small">{error}</p>}
     </Panel>
   );
@@ -993,6 +1472,7 @@ export function PropertiesPanel() {
           <DeleteButton label="Xoá tất cả" />
         </div>
         <TransformButtons />
+        <AlignButtons count={selection.length} />
         <p className="muted small">
           Kéo để di chuyển cùng lúc · phím mũi tên để dịch từng ô lưới · Shift+2 để phóng tới vùng
           chọn.
@@ -1022,6 +1502,14 @@ export function PropertiesPanel() {
     const landmark = floor.landmarks?.find((l) => l.id === ref.id);
     if (landmark) return <LandmarkPanel key={landmark.id} landmark={landmark} />;
   }
+  if (ref?.type === 'furniture') {
+    const item = floor.furniture?.find((f) => f.id === ref.id);
+    if (item) return <FurniturePanel key={item.id} item={item} />;
+  }
+  if (ref?.type === 'annotation') {
+    const annotation = floor.annotations?.find((a) => a.id === ref.id);
+    if (annotation) return <AnnotationPanel key={annotation.id} annotation={annotation} />;
+  }
   if (ref?.type === 'navNode') {
     const node = floor.navGraph.nodes.find((n) => n.id === ref.id);
     if (node) return <NavNodePanel key={node.id} node={node} floor={floor} />;
@@ -1034,6 +1522,7 @@ export function PropertiesPanel() {
   return (
     <>
       <FloorPanel key={floor.id} floor={floor} />
+      <LayersPanel floor={floor} />
       <BuildingPanel />
       <NavGraphPanel key={`nav:${floor.id}`} floor={floor} />
       <BackgroundPanel key={`bg:${floor.id}`} floor={floor} />

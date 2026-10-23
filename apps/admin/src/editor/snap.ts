@@ -15,6 +15,7 @@ import {
   type Id,
   type Point,
 } from '@hwn/map-core';
+import { annotationPoints, furnitureCorners } from './ops';
 import type { EndpointRef, ItemRef } from './types';
 
 export type SnapKind = 'endpoint' | 'wall' | 'angle' | 'grid' | 'free';
@@ -96,7 +97,7 @@ export function hitNavNode(floor: Floor, p: Point, tol: number): Id | null {
 
 /**
  * Đối tượng dưới con trỏ, theo thứ tự ưu tiên:
- * (nút đồ thị) > ô cửa > thang > tường > (cạnh đồ thị) > phòng.
+ * (nút đồ thị) > mốc > ghi chú > ô cửa > thang > tường > nội thất > (cạnh đồ thị) > phòng.
  * Nút/cạnh đồ thị chỉ xét khi `nav` = true (đồ thị đang hiện).
  * @param tol dung sai (m), thường quy đổi từ vài pixel.
  */
@@ -115,6 +116,9 @@ export function hitTest(
 
   const landmark = hitLandmark(floor, p, tol);
   if (landmark) return { type: 'landmark', id: landmark };
+
+  const annotation = hitAnnotation(floor, p, tol);
+  if (annotation) return { type: 'annotation', id: annotation };
 
   for (const o of floor.openings) {
     const wall = walls.get(o.wallId);
@@ -137,6 +141,10 @@ export function hitTest(
   }
   if (best) return { type: 'wall', id: best.id };
 
+  for (const f of [...(floor.furniture ?? [])].reverse()) {
+    if (pointInPolygon(p, furnitureCorners(f))) return { type: 'furniture', id: f.id };
+  }
+
   if (opts.nav) {
     const nodes = new Map(floor.navGraph.nodes.map((n) => [n.id, n]));
     for (const e of floor.navGraph.edges) {
@@ -154,6 +162,23 @@ export function hitTest(
   }
   return null;
 }
+
+/**
+ * Ghi chú dưới con trỏ (vẽ sau ưu tiên): khối chữ, hoặc gần đường kích thước — nhãn số đo nằm
+ * sát đường nên dung sai rộng hơn một chút.
+ */
+export function hitAnnotation(floor: Floor, p: Point, tol: number): Id | null {
+  for (const a of [...(floor.annotations ?? [])].reverse()) {
+    const pts = annotationPoints(a);
+    if (a.kind === 'text' ? pointInPolygon(p, pts) : nearSegment(p, pts[2]!, pts[3]!, tol * 2.5)) {
+      return a.id;
+    }
+  }
+  return null;
+}
+
+const nearSegment = (p: Point, a: Point, b: Point, tol: number) =>
+  projectPointOnSegment(p, a, b).distance <= tol;
 
 /** Biểu tượng mốc có bán kính ~11 px, lớn hơn dung sai chọn thông thường (`tol` ~8 px). */
 export function hitLandmark(floor: Floor, p: Point, tol: number): Id | null {

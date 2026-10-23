@@ -4,9 +4,12 @@
  */
 import {
   add,
+  angleOf,
+  furniturePolygon,
   boundsOf,
   createId,
   distance,
+  dot,
   offsetAlongWall,
   pointInPolygon,
   pointOnWall,
@@ -14,17 +17,24 @@ import {
   polygonCentroid,
   projectPointOnSegment,
   rotatePoint,
+  scale,
   segmentIntersection,
   sub,
+  toDegrees,
+  toRadians,
   wallLength,
+  type Annotation,
   type BBox,
   type Building,
   type Connector,
   type ConnectorType,
+  type DimensionAnnotation,
   type DoorStyle,
   type ElevatorKind,
   type Floor,
   type FloorBackground,
+  type Furniture,
+  type FurnitureKind,
   type Id,
   type Landmark,
   type LandmarkKind,
@@ -34,11 +44,14 @@ import {
   type OpeningType,
   type Point,
   type Room,
+  type TextAnnotation,
   type Wall,
   type WallKind,
 } from '@hwn/map-core';
+import { FURNITURE, segmentQuad } from '@hwn/map-render';
 import { current, isDraft, type Draft } from 'immer';
-import type { Clipboard, EndpointRef, ItemRef } from './types';
+import { normalizeAngle } from './furniture';
+import type { Clipboard, EndpointRef, ItemRef, LayerId } from './types';
 
 /**
  * Sao chép sâu, dùng được cả với draft của immer (structuredClone không clone được Proxy).
@@ -191,6 +204,10 @@ export interface DragPlan {
   connectors: { id: Id; polygon: Point[] }[];
   rooms: { id: Id; polygon: Point[]; destination?: Point }[];
   landmarks: { id: Id; position: Point }[];
+  /** Bản gốc của các ghi chú được chọn. */
+  annotations: Annotation[];
+  /** Bản gốc của nội thất / thiết bị được chọn. */
+  furniture: Furniture[];
   /** Nút đồ thị được chọn, kèm nút đại diện của phòng/thang đang được kéo. */
   navNodes: { id: Id; position: Point }[];
 }
@@ -226,6 +243,12 @@ export function makeDragPlan(floor: Floor, selection: readonly ItemRef[]): DragP
   const landmarks = (floor.landmarks ?? [])
     .filter((l) => landmarkIds.has(l.id))
     .map((l) => ({ id: l.id, position: { ...l.position } }));
+  const annotationIds = new Set(selection.filter((r) => r.type === 'annotation').map((r) => r.id));
+  const annotations = (floor.annotations ?? [])
+    .filter((a) => annotationIds.has(a.id))
+    .map(deepClone);
+  const furnitureIds = new Set(selection.filter((r) => r.type === 'furniture').map((r) => r.id));
+  const furniture = (floor.furniture ?? []).filter((f) => furnitureIds.has(f.id)).map(deepClone);
   const nodeIds = new Set(selection.filter((r) => r.type === 'navNode').map((r) => r.id));
   const navNodes = floor.navGraph.nodes
     .filter(
@@ -237,7 +260,7 @@ export function makeDragPlan(floor: Floor, selection: readonly ItemRef[]): DragP
           )),
     )
     .map((n) => ({ id: n.id, position: { ...n.position } }));
-  return { walls, joints, connectors, rooms, landmarks, navNodes };
+  return { walls, joints, connectors, rooms, landmarks, annotations, furniture, navNodes };
 }
 
 /** Áp một phép biến đổi điểm `fn` lên mọi đối tượng trong kế hoạch (tính từ vị trí gốc). */
@@ -267,6 +290,14 @@ export function applyTransform(floor: Floor, plan: DragPlan, fn: (p: Point) => P
   for (const l of plan.landmarks) {
     const landmark = floor.landmarks?.find((x) => x.id === l.id);
     if (landmark) landmark.position = fn(l.position);
+  }
+  for (const a of plan.annotations) {
+    const i = floor.annotations?.findIndex((x) => x.id === a.id) ?? -1;
+    if (i >= 0) floor.annotations![i] = transformAnnotation(a, fn);
+  }
+  for (const f of plan.furniture) {
+    const i = floor.furniture?.findIndex((x) => x.id === f.id) ?? -1;
+    if (i >= 0) floor.furniture![i] = transformFurniture(f, fn);
   }
   for (const n of plan.navNodes) {
     const node = floor.navGraph.nodes.find((x) => x.id === n.id);
@@ -303,6 +334,12 @@ export function selectionBounds(floor: Floor, refs: readonly ItemRef[]): BBox | 
     } else if (r.type === 'landmark') {
       const l = floor.landmarks?.find((x) => x.id === r.id);
       if (l) points.push(l.position);
+    } else if (r.type === 'annotation') {
+      const a = floor.annotations?.find((x) => x.id === r.id);
+      if (a) points.push(...annotationPoints(a));
+    } else if (r.type === 'furniture') {
+      const f = floor.furniture?.find((x) => x.id === r.id);
+      if (f) points.push(...furnitureCorners(f));
     } else {
       const e = floor.navGraph.edges.find((x) => x.id === r.id);
       for (const n of e ? [node(e.from), node(e.to)] : []) if (n) points.push(n.position);
@@ -326,6 +363,84 @@ export function transformItems(floor: Floor, refs: readonly ItemRef[], kind: Tra
         ? (p: Point) => ({ x: 2 * c.x - p.x, y: p.y })
         : (p: Point) => ({ x: p.x, y: 2 * c.y - p.y });
   applyTransform(floor, makeDragPlan(floor, refs), fn);
+}
+
+export type AlignMode = 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom';
+
+/** Từng đối tượng dời được kèm hộp bao (ô cửa đi theo tường, cạnh đồ thị đi theo nút — bỏ qua). */
+function movableBoxes(floor: Floor, refs: readonly ItemRef[]) {
+  return refs.flatMap((r) => {
+    if (r.type === 'opening' || r.type === 'navEdge') return [];
+    const b = selectionBounds(floor, [r]);
+    return b ? [{ ref: r, b }] : [];
+  });
+}
+
+/**
+ * Dời từng đối tượng đi một đoạn riêng. Kế hoạch kéo lập từ vị trí gốc trước khi dời cái nào.
+ * ponytail: mỗi đối tượng dời độc lập — hai tường được chọn nối chung một đầu mà dời lệch nhau thì
+ * bị tách ra; muốn giữ khớp thì gom các tường nối nhau thành một nhóm trước khi căn.
+ */
+function moveEach(floor: Floor, moves: readonly { ref: ItemRef; delta: Point }[]) {
+  const plans = moves.map((m) => ({ plan: makeDragPlan(floor, [m.ref]), delta: m.delta }));
+  for (const { plan, delta } of plans) {
+    if (Math.abs(delta.x) > 1e-9 || Math.abs(delta.y) > 1e-9) applyDrag(floor, plan, delta);
+  }
+}
+
+/** Căn các đối tượng được chọn theo mép / tâm của hộp bao chung. */
+export function alignItems(floor: Floor, refs: readonly ItemRef[], mode: AlignMode) {
+  const boxes = movableBoxes(floor, refs);
+  const all = selectionBounds(
+    floor,
+    boxes.map((x) => x.ref),
+  );
+  if (boxes.length < 2 || !all) return;
+  const horizontal = mode === 'left' || mode === 'centerX' || mode === 'right';
+  const key = (b: BBox) =>
+    mode === 'left'
+      ? b.minX
+      : mode === 'right'
+        ? b.maxX
+        : mode === 'top'
+          ? b.minY
+          : mode === 'bottom'
+            ? b.maxY
+            : horizontal
+              ? (b.minX + b.maxX) / 2
+              : (b.minY + b.maxY) / 2;
+  const target = key(all);
+  moveEach(
+    floor,
+    boxes.map(({ ref, b }) => {
+      const d = target - key(b);
+      return { ref, delta: horizontal ? { x: d, y: 0 } : { x: 0, y: d } };
+    }),
+  );
+}
+
+/**
+ * Chia đều khoảng hở giữa các đối tượng theo trục ngang (`x`) hoặc dọc (`y`): hai đối tượng ngoài
+ * cùng giữ nguyên, các đối tượng ở giữa dời sao cho khoảng trống giữa hai cái liền nhau bằng nhau.
+ */
+export function distributeItems(floor: Floor, refs: readonly ItemRef[], axis: 'x' | 'y') {
+  const lo = axis === 'x' ? 'minX' : 'minY';
+  const hi = axis === 'x' ? 'maxX' : 'maxY';
+  const boxes = movableBoxes(floor, refs).sort((a, b) => a.b[lo] + a.b[hi] - (b.b[lo] + b.b[hi]));
+  if (boxes.length < 3) return;
+  const first = boxes[0]!.b;
+  const last = boxes[boxes.length - 1]!.b;
+  const sizes = boxes.reduce((s, x) => s + (x.b[hi] - x.b[lo]), 0);
+  const gap = (last[hi] - first[lo] - sizes) / (boxes.length - 1);
+  let cursor = first[lo];
+  moveEach(
+    floor,
+    boxes.map(({ ref, b }) => {
+      const d = cursor - b[lo];
+      cursor += b[hi] - b[lo] + gap;
+      return { ref, delta: axis === 'x' ? { x: d, y: 0 } : { x: 0, y: d } };
+    }),
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -397,6 +512,15 @@ export function itemsInRect(
   for (const l of floor.landmarks ?? []) {
     if (inRect(l.position, r)) refs.push({ type: 'landmark', id: l.id });
   }
+  for (const a of floor.annotations ?? []) {
+    const pts = annotationPoints(a);
+    // Kích thước: xét đường kích thước (2 điểm cuối); chữ: khối chữ.
+    const hit = a.kind === 'text' ? poly(pts) : seg(pts[2]!, pts[3]!);
+    if (hit) refs.push({ type: 'annotation', id: a.id });
+  }
+  for (const f of floor.furniture ?? []) {
+    if (poly(furnitureCorners(f))) refs.push({ type: 'furniture', id: f.id });
+  }
   if (opts.nav) {
     const nodes = new Map(floor.navGraph.nodes.map((n) => [n.id, n]));
     for (const n of floor.navGraph.nodes) {
@@ -418,6 +542,8 @@ export function allItems(floor: Floor, opts: { nav?: boolean } = {}): ItemRef[] 
     ...floor.connectors.map((c) => ({ type: 'connector' as const, id: c.id })),
     ...floor.rooms.map((r) => ({ type: 'room' as const, id: r.id })),
     ...(floor.landmarks ?? []).map((l) => ({ type: 'landmark' as const, id: l.id })),
+    ...(floor.annotations ?? []).map((a) => ({ type: 'annotation' as const, id: a.id })),
+    ...(floor.furniture ?? []).map((f) => ({ type: 'furniture' as const, id: f.id })),
     ...(opts.nav ? floor.navGraph.nodes.map((n) => ({ type: 'navNode' as const, id: n.id })) : []),
   ];
 }
@@ -674,6 +800,14 @@ export function deleteItems(floor: Floor, refs: readonly ItemRef[]) {
   if (floor.landmarks && landmarkIds.size) {
     floor.landmarks = floor.landmarks.filter((l) => !landmarkIds.has(l.id));
   }
+  const annotationIds = ids('annotation');
+  if (floor.annotations && annotationIds.size) {
+    floor.annotations = floor.annotations.filter((a) => !annotationIds.has(a.id));
+  }
+  const furnitureIds = ids('furniture');
+  if (floor.furniture && furnitureIds.size) {
+    floor.furniture = floor.furniture.filter((f) => !furnitureIds.has(f.id));
+  }
   for (const o of floor.openings) if (wallIds.has(o.wallId)) openingIds.add(o.id);
 
   floor.walls = floor.walls.filter((w) => !wallIds.has(w.id));
@@ -698,7 +832,10 @@ export function copyItems(floor: Floor, refs: readonly ItemRef[]): Clipboard | n
   const connectors = floor.connectors.filter((c) => has('connector', c.id));
   const rooms = floor.rooms.filter((r) => has('room', r.id));
   const landmarks = (floor.landmarks ?? []).filter((l) => has('landmark', l.id));
-  if (!walls.length && !connectors.length && !rooms.length && !landmarks.length) return null;
+  const annotations = (floor.annotations ?? []).filter((a) => has('annotation', a.id));
+  const furniture = (floor.furniture ?? []).filter((f) => has('furniture', f.id));
+  const lists = [walls, connectors, rooms, landmarks, annotations, furniture];
+  if (!lists.some((list) => list.length)) return null;
   return {
     sourceFloorId: floor.id,
     walls: walls.map(deepClone),
@@ -706,6 +843,8 @@ export function copyItems(floor: Floor, refs: readonly ItemRef[]): Clipboard | n
     connectors: connectors.map(deepClone),
     rooms: rooms.map(deepClone),
     landmarks: landmarks.map(deepClone),
+    annotations: annotations.map(deepClone),
+    furniture: furniture.map(deepClone),
   };
 }
 
@@ -762,6 +901,16 @@ export function pasteItems(floor: Floor, clip: Clipboard, offset: Point): ItemRe
     (floor.landmarks ??= []).push({ ...deepClone(l), id, position: add(l.position, offset) });
     created.push({ type: 'landmark', id });
   }
+  for (const a of clip.annotations ?? []) {
+    const id = createId('note');
+    (floor.annotations ??= []).push({ ...transformAnnotation(a, (p) => add(p, offset)), id });
+    created.push({ type: 'annotation', id });
+  }
+  for (const f of clip.furniture ?? []) {
+    const id = createId('furn');
+    (floor.furniture ??= []).push({ ...deepClone(f), id, position: add(f.position, offset) });
+    created.push({ type: 'furniture', id });
+  }
   return created;
 }
 
@@ -805,6 +954,243 @@ export function setRoomDestination(floor: Floor, roomId: Id, p: Point | undefine
   if (p) room.destination = { ...p };
   else delete room.destination;
   return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Ghi chú bản vẽ (kích thước, chữ)                                    */
+/* ------------------------------------------------------------------ */
+
+/** Nội dung và chiều cao chữ (m) mặc định của chú thích mới. */
+export const DEFAULT_NOTE_TEXT = 'Ghi chú';
+export const DEFAULT_TEXT_SIZE = 0.6;
+
+/** Đường kích thước đã dời `offset`: hai đầu `a`, `b`, pháp tuyến trái và chiều dài đo được. */
+export function dimensionLine(d: Pick<DimensionAnnotation, 'start' | 'end' | 'offset'>) {
+  const length = distance(d.start, d.end);
+  const dir = length > 1e-9 ? scale(sub(d.end, d.start), 1 / length) : { x: 1, y: 0 };
+  const normal = { x: -dir.y, y: dir.x };
+  const shift = scale(normal, d.offset);
+  return { a: add(d.start, shift), b: add(d.end, shift), normal, length };
+}
+
+/** Khoảng dời (có dấu) để đường kích thước của đoạn `start`-`end` đi qua điểm `p`. */
+export const dimensionOffsetAt = (start: Point, end: Point, p: Point) =>
+  dot(sub(p, start), dimensionLine({ start, end, offset: 0 }).normal);
+
+export function addDimension(
+  floor: Floor,
+  start: Point,
+  end: Point,
+  offset: number,
+): DimensionAnnotation | null {
+  if (distance(start, end) < MIN_WALL_LENGTH) return null;
+  const dim: DimensionAnnotation = {
+    id: createId('note'),
+    kind: 'dimension',
+    start: { ...start },
+    end: { ...end },
+    offset,
+  };
+  (floor.annotations ??= []).push(dim);
+  return dim;
+}
+
+export function addText(
+  floor: Floor,
+  position: Point,
+  text = DEFAULT_NOTE_TEXT,
+  size = DEFAULT_TEXT_SIZE,
+): TextAnnotation {
+  const note: TextAnnotation = {
+    id: createId('note'),
+    kind: 'text',
+    position: { ...position },
+    text,
+    size,
+  };
+  (floor.annotations ??= []).push(note);
+  return note;
+}
+
+/** Kích thước khối chữ (m), ước lượng theo số ký tự — dùng chung khi vẽ và khi chọn. */
+export function textBox(t: Pick<TextAnnotation, 'text' | 'size'>) {
+  const lines = t.text.split('\n');
+  const longest = Math.max(1, ...lines.map((l) => l.length));
+  return { width: longest * t.size * 0.6, height: lines.length * t.size * 1.2 };
+}
+
+/** Góc đọc được: đưa về (-90°, 90°] để chữ không bị lộn ngược. */
+export function uprightAngle(deg: number): number {
+  let a = ((deg % 360) + 360) % 360;
+  if (a > 180) a -= 360;
+  if (a > 90) a -= 180;
+  else if (a <= -90) a += 180;
+  return Math.round(a * 1e6) / 1e6;
+}
+
+/**
+ * Các điểm đặc trưng của ghi chú. Kích thước: 2 điểm đo rồi 2 đầu đường kích thước; chữ: 4 góc
+ * khối chữ (theo góc xoay).
+ */
+export function annotationPoints(a: Annotation): Point[] {
+  if (a.kind === 'dimension') {
+    const line = dimensionLine(a);
+    return [a.start, a.end, line.a, line.b];
+  }
+  const { width, height } = textBox(a);
+  return rectPolygon(a.position, width, height).map((p) =>
+    rotatePoint(p, a.position, a.rotation ?? 0),
+  );
+}
+
+/**
+ * Áp phép biến đổi điểm `fn` lên ghi chú. Đường kích thước giữ đúng phía (kể cả khi lật); chữ
+ * xoay theo nhưng luôn đọc được (không lộn ngược, không bị lật gương).
+ */
+export function transformAnnotation(a: Annotation, fn: (p: Point) => Point): Annotation {
+  if (a.kind === 'dimension') {
+    const start = fn(a.start);
+    const end = fn(a.end);
+    return { ...a, start, end, offset: dimensionOffsetAt(start, end, fn(dimensionLine(a).a)) };
+  }
+  const r = toRadians(a.rotation ?? 0);
+  const position = fn(a.position);
+  const tip = fn(add(a.position, { x: Math.cos(r), y: Math.sin(r) }));
+  const rotation = uprightAngle(toDegrees(angleOf(sub(tip, position))));
+  const next: TextAnnotation = { ...a, position };
+  if (rotation) next.rotation = rotation;
+  else delete next.rotation;
+  return next;
+}
+
+/* ------------------------------------------------------------------ */
+/* Nội thất & thiết bị                                                 */
+/* ------------------------------------------------------------------ */
+
+export function addFurniture(
+  floor: Floor,
+  kind: FurnitureKind,
+  position: Point,
+  rotation = 0,
+): Furniture {
+  const def = FURNITURE[kind];
+  const item: Furniture = {
+    id: createId('furn'),
+    kind,
+    position: { ...position },
+    width: def.width,
+    depth: def.depth,
+  };
+  if (rotation) item.rotation = normalizeAngle(rotation);
+  (floor.furniture ??= []).push(item);
+  return item;
+}
+
+/** Bốn góc ký hiệu (theo góc xoay). */
+export const furnitureCorners = (f: Furniture): Point[] => furniturePolygon(f);
+
+/** Áp phép biến đổi `fn` lên ký hiệu: tâm dời theo, góc xoay theo hướng trục ngang. */
+export function transformFurniture(f: Furniture, fn: (p: Point) => Point): Furniture {
+  const r = toRadians(f.rotation ?? 0);
+  const position = fn(f.position);
+  const tip = fn(add(f.position, { x: Math.cos(r), y: Math.sin(r) }));
+  const rotation = normalizeAngle(toDegrees(angleOf(sub(tip, position))));
+  const next: Furniture = { ...f, position };
+  if (rotation) next.rotation = rotation;
+  else delete next.rotation;
+  return next;
+}
+
+/* ------------------------------------------------------------------ */
+/* Viền vùng chọn (dùng cho cảnh 3D)                                   */
+/* ------------------------------------------------------------------ */
+
+export interface Outline {
+  points: Point[];
+  closed: boolean;
+}
+
+/** Ô vuông cạnh `size` quanh điểm `p` — viền cho đối tượng dạng điểm. */
+const squareAt = (p: Point, size: number): Outline => ({
+  points: rectPolygon(p, size, size),
+  closed: true,
+});
+
+/** Viền mặt bằng của các đối tượng được chọn (tường theo độ dày, ô cửa theo đoạn trên tường…). */
+export function selectionOutlines(floor: Floor, refs: readonly ItemRef[]): Outline[] {
+  const node = (id: Id) => floor.navGraph.nodes.find((n) => n.id === id);
+  return refs.flatMap((r): Outline[] => {
+    switch (r.type) {
+      case 'wall': {
+        const w = floor.walls.find((x) => x.id === r.id);
+        if (!w) return [];
+        const seg = { from: 0, to: wallLength(w), start: w.start, end: w.end };
+        return [{ points: segmentQuad(w, seg), closed: true }];
+      }
+      case 'opening': {
+        const o = floor.openings.find((x) => x.id === r.id);
+        const w = o && floor.walls.find((x) => x.id === o.wallId);
+        if (!o || !w) return [];
+        const a = pointOnWall(w, o.offset - o.width / 2);
+        const b = pointOnWall(w, o.offset + o.width / 2);
+        return [{ points: [a, b], closed: false }];
+      }
+      case 'room':
+      case 'connector': {
+        const list: readonly { id: Id; polygon: Point[] }[] =
+          r.type === 'room' ? floor.rooms : floor.connectors;
+        const shape = list.find((x) => x.id === r.id);
+        return shape ? [{ points: shape.polygon, closed: true }] : [];
+      }
+      case 'landmark': {
+        const l = floor.landmarks?.find((x) => x.id === r.id);
+        return l ? [squareAt(l.position, 0.8)] : [];
+      }
+      case 'annotation': {
+        const a = floor.annotations?.find((x) => x.id === r.id);
+        if (!a) return [];
+        const pts = annotationPoints(a);
+        return [
+          a.kind === 'text'
+            ? { points: pts, closed: true }
+            : { points: pts.slice(2), closed: false },
+        ];
+      }
+      case 'furniture': {
+        const f = floor.furniture?.find((x) => x.id === r.id);
+        return f ? [{ points: furnitureCorners(f), closed: true }] : [];
+      }
+      case 'navNode': {
+        const n = node(r.id);
+        return n ? [squareAt(n.position, 0.5)] : [];
+      }
+      case 'navEdge': {
+        const e = floor.navGraph.edges.find((x) => x.id === r.id);
+        const a = e && node(e.from);
+        const b = e && node(e.to);
+        return a && b ? [{ points: [a.position, b.position], closed: false }] : [];
+      }
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Lớp                                                                 */
+/* ------------------------------------------------------------------ */
+
+/** Bản sao `floor` không có các lớp `layers` (lớp tường kéo theo ô cửa). */
+export function withoutLayers(floor: Floor, layers: readonly LayerId[]): Floor {
+  if (!layers.length) return floor;
+  const off = new Set(layers);
+  return {
+    ...floor,
+    ...(off.has('walls') && { walls: [], openings: [] }),
+    ...(off.has('rooms') && { rooms: [] }),
+    ...(off.has('connectors') && { connectors: [] }),
+    ...(off.has('landmarks') && { landmarks: [] }),
+    ...(off.has('annotations') && { annotations: [] }),
+    ...(off.has('furniture') && { furniture: [] }),
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -950,6 +1336,8 @@ export function clearBuilding(building: Building) {
     f.connectors = [];
     f.rooms = [];
     f.landmarks = [];
+    f.annotations = [];
+    f.furniture = [];
     f.navGraph = { nodes: [], edges: [] };
   }
 }

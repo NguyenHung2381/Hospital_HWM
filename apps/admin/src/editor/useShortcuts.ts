@@ -2,11 +2,14 @@ import { useEffect, useRef, type RefObject } from 'react';
 import type { MapStageHandle } from '@hwn/map-render';
 import { inOverlay, isTyping, letterOf, onBackspace } from './keyboard';
 import {
+  alignItems,
   allItems,
   copyItems,
+  distributeItems,
   pasteItems,
   selectionBounds,
   transformItems,
+  type AlignMode,
   type TransformKind,
 } from './ops';
 import { useEditor } from './store';
@@ -73,6 +76,18 @@ export const editorCommands = {
     const { selection, edit } = useEditor.getState();
     if (!selection.length) return;
     edit((_, f) => transformItems(f, selection, kind));
+  },
+  /** Căn các đối tượng đang chọn theo mép / tâm chung. */
+  align(mode: AlignMode) {
+    const { selection, edit } = useEditor.getState();
+    if (selection.length < 2) return;
+    edit((_, f) => alignItems(f, selection, mode));
+  },
+  /** Chia đều khoảng hở giữa các đối tượng đang chọn theo trục ngang / dọc. */
+  distribute(axis: 'x' | 'y') {
+    const { selection, edit } = useEditor.getState();
+    if (selection.length < 3) return;
+    edit((_, f) => distributeItems(f, selection, axis));
   },
   /** Dịch vùng chọn (trên mọi toà) theo số ô lưới, theo hướng của toà đang mở. */
   nudge(dx: number, dy: number) {

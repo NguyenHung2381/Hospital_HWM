@@ -167,6 +167,75 @@ export interface Landmark {
 }
 
 /* ------------------------------------------------------------------ */
+/* Ghi chú bản vẽ                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Đường ghi kích thước giữa hai điểm. Đường kích thước song song với đoạn `start`-`end`, dời đi
+ * `offset` (m) theo pháp tuyến trái của đoạn (vector (-dy, dx) với d = end - start).
+ */
+export interface DimensionAnnotation {
+  id: Id;
+  kind: 'dimension';
+  start: Point;
+  end: Point;
+  offset: number;
+}
+
+/** Chú thích chữ tự do; `position` là tâm khối chữ. */
+export interface TextAnnotation {
+  id: Id;
+  kind: 'text';
+  position: Point;
+  /** Nội dung (có thể nhiều dòng). */
+  text: string;
+  /** Chiều cao chữ (m) — chữ to / nhỏ theo bản vẽ khi phóng to thu nhỏ. */
+  size: number;
+  /** Góc xoay (độ, theo chiều kim đồng hồ). Bỏ trống = 0. */
+  rotation?: number;
+}
+
+/** Ghi chú trên bản vẽ — chỉ editor dùng, không ảnh hưởng chỉ đường hay app người dùng. */
+export type Annotation = DimensionAnnotation | TextAnnotation;
+
+/* ------------------------------------------------------------------ */
+/* Nội thất & thiết bị                                                 */
+/* ------------------------------------------------------------------ */
+
+export type FurnitureKind =
+  | 'bed'
+  | 'icuBed'
+  | 'crib'
+  | 'stretcher'
+  | 'examTable'
+  | 'chair'
+  | 'chairRow'
+  | 'desk'
+  | 'counter'
+  | 'cabinet'
+  | 'dentalChair'
+  | 'ultrasound'
+  | 'xray'
+  | 'ct'
+  | 'ivPole'
+  | 'sink'
+  | 'toilet';
+
+/**
+ * Ký hiệu nội thất / thiết bị đặt trên mặt bằng: hình chữ nhật `width` × `depth` (m) có tâm ở
+ * `position`. Mặt "lưng" (đầu giường, lưng ghế…) ở cạnh trên khi chưa xoay (phía -y).
+ */
+export interface Furniture {
+  id: Id;
+  kind: FurnitureKind;
+  position: Point;
+  width: number;
+  depth: number;
+  /** Góc xoay (độ, theo chiều kim đồng hồ). Bỏ trống = 0. */
+  rotation?: number;
+}
+
+/* ------------------------------------------------------------------ */
 /* Đồ thị đi lại (dùng để tìm đường)                                   */
 /* ------------------------------------------------------------------ */
 
@@ -228,6 +297,10 @@ export interface Floor {
   rooms: Room[];
   /** Mốc độc lập trên tầng (dữ liệu cũ có thể không có). */
   landmarks?: Landmark[];
+  /** Đường ghi kích thước, chú thích chữ (dữ liệu cũ có thể không có). */
+  annotations?: Annotation[];
+  /** Nội thất, thiết bị (giường, ghế chờ, máy chụp…) — dữ liệu cũ có thể không có. */
+  furniture?: Furniture[];
   navGraph: NavGraph;
   background?: FloorBackground;
 }

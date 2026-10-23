@@ -1,5 +1,6 @@
 import {
   distance,
+  furnitureAcross,
   pointInPolygon,
   pointsEqual,
   polylineLength,
@@ -99,6 +100,9 @@ function addArc(g: Graph, from: Key, arc: Arc) {
   else g.adj.set(from, [arc]);
 }
 
+/** Chi phí cộng thêm (m) cho cạnh đi xuyên qua nội thất. */
+export const FURNITURE_PENALTY = 100;
+
 function canTravel(connector: Connector, fromElevation: number, toElevation: number): boolean {
   if (connector.direction === 'both') return true;
   return connector.direction === 'up' ? toElevation > fromElevation : toElevation < fromElevation;
@@ -117,7 +121,11 @@ export function buildBuildingGraph(building: Building, options: RouteOptions = {
       const a = g.nodes.get(keyOf(floor.id, edge.from));
       const b = g.nodes.get(keyOf(floor.id, edge.to));
       if (!a || !b) continue;
-      const cost = edge.weight ?? distance(a.position, b.position);
+      // Cạnh xuyên qua nội thất (đồ thị vẽ tay / chưa sinh lại sau khi kê đồ): vẫn đi được nếu
+      // không còn lối nào khác, nhưng tuyến sẽ ưu tiên đường vòng.
+      const blocked = furnitureAcross(floor.furniture, a.position, b.position);
+      const cost =
+        (edge.weight ?? distance(a.position, b.position)) + (blocked ? FURNITURE_PENALTY : 0);
       addArc(g, a.key, { to: b.key, cost });
       addArc(g, b.key, { to: a.key, cost });
     }
@@ -182,7 +190,11 @@ function attachLocation(g: Graph, floor: Floor, location: Location, tag: string)
     const onEdgeKey = `${key}_proj`;
     g.nodes.set(onEdgeKey, { key: onEdgeKey, floorId: floor.id, position: best.point });
     const link = (u: Key, v: Key) => {
-      const cost = distance(g.nodes.get(u)!.position, g.nodes.get(v)!.position);
+      const pu = g.nodes.get(u)!.position;
+      const pv = g.nodes.get(v)!.position;
+      // Đoạn tạm cũng bị phạt nếu xuyên qua nội thất (nếu không tuyến sẽ "lách" qua cạnh bị phạt).
+      const cost =
+        distance(pu, pv) + (furnitureAcross(floor.furniture, pu, pv) ? FURNITURE_PENALTY : 0);
       addArc(g, u, { to: v, cost });
       addArc(g, v, { to: u, cost });
     };

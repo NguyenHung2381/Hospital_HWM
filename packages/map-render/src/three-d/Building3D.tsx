@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
 import * as THREE from 'three';
 import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Line, OrbitControls } from '@react-three/drei';
@@ -9,6 +9,7 @@ import {
   type Department,
   type Floor,
   type Id,
+  type Point,
   type Room,
   type Route,
 } from '@hwn/map-core';
@@ -19,6 +20,7 @@ import { floorBounds, mergeBounds } from '../core/viewport';
 import type { MapLocation } from '../types';
 import {
   buildElevatorGeometry,
+  buildFurnitureGeometry,
   buildSlabGeometry,
   buildWallGeometry,
   flatPolygon,
@@ -37,6 +39,28 @@ import {
   type StairLayout,
 } from './stairs';
 
+/**
+ * Cho phép chọn / kéo đối tượng trên một tầng ngay trong cảnh 3D (editor). Mọi toạ độ theo mặt bằng
+ * của tầng (m). Các hàm nên đọc state mới nhất mỗi lần gọi vì một lần kéo dùng mãi hàm lúc nhấn.
+ */
+export interface Floor3DEditor {
+  floorId: Id;
+  /** Nhấn chuột trái tại `p`; trả về true nếu bắt đầu kéo (tạm khoá xoay camera). */
+  down(p: Point, evt: PointerEvent): boolean;
+  /** Đang kéo: con trỏ chiếu xuống mặt phẳng ngang qua điểm đã nhấn. */
+  move(p: Point): void;
+  up(): void;
+  /** Click không kéo (vd. bấm chỗ trống để bỏ chọn). */
+  click?(p: Point, evt: MouseEvent): void;
+  /** Có đối tượng chọn được dưới con trỏ (để đổi con trỏ chuột). */
+  hover?(p: Point): boolean;
+  /** Viền các đối tượng đang chọn. */
+  outlines?: readonly { points: readonly Point[]; closed: boolean }[];
+}
+
+/** Màu viền vùng chọn trong 3D (cùng màu với editor 2D). */
+const SELECTION_COLOR = '#f97316';
+
 export interface Building3DProps {
   building: Building;
   route?: Route | null;
@@ -53,6 +77,8 @@ export interface Building3DProps {
   theme?: ThemeSetting;
   destinationLabel?: string;
   onRoomClick?: (room: Room) => void;
+  /** Chọn / kéo đối tượng trên tầng `editor.floorId`. */
+  editor?: Floor3DEditor | null;
   className?: string;
   style?: CSSProperties;
 }
@@ -71,6 +97,7 @@ export function Building3D({
   theme: themeSetting,
   destinationLabel,
   onRoomClick,
+  editor,
   className,
   style,
 }: Building3DProps) {
@@ -134,6 +161,7 @@ export function Building3D({
               stairs={stairs}
               label={floors.length > 1 ? floor.name : undefined}
               onRoomClick={onRoomClick}
+              editor={editor?.floorId === floor.id ? editor : null}
             />
           ) : null,
         )}
@@ -294,6 +322,7 @@ interface FloorMeshProps {
   /** Tên tầng, ghi ở góc tấm sàn để phân biệt các tầng khi xếp chồng. */
   label?: string;
   onRoomClick?: (room: Room) => void;
+  editor?: Floor3DEditor | null;
 }
 
 export function FloorMesh({
@@ -307,8 +336,21 @@ export function FloorMesh({
   stairs,
   label,
   onRoomClick,
+  editor,
 }: FloorMeshProps) {
   const bounds = useMemo(() => floorBounds(floor), [floor]);
+  const groupRef = useRef<THREE.Group>(null);
+  const camera = useThree((s) => s.camera);
+  const gl = useThree((s) => s.gl);
+  const controls = useThree((s) => s.controls) as OrbitControlsImpl | null;
+  const furniture = useMemo(() => buildFurnitureGeometry(floor.furniture ?? []), [floor.furniture]);
+  useEffect(
+    () => () => {
+      furniture.body?.dispose();
+      furniture.soft?.dispose();
+    },
+    [furniture],
+  );
   const wallHeight = floor.height * wallHeightScale;
   const stairLabels = useMemo(
     () => ({
@@ -365,8 +407,72 @@ export function FloorMesh({
     document.body.style.cursor = cursor;
   };
 
+  /* ---------- Chọn / kéo đối tượng (editor) ---------- */
+
+  const editing = !ghost ? editor : null;
+  /** Điểm trúng (toạ độ thế giới) → toạ độ mặt bằng tầng + cao độ so với sàn. */
+  const toPlan = (world: THREE.Vector3) => {
+    const local = groupRef.current!.worldToLocal(world.clone());
+    return { p: { x: local.x, y: local.z }, height: local.y };
+  };
+
+  const onPointerDown = (e: ThreeEvent<PointerEvent>) => {
+    if (!editing || e.nativeEvent.button !== 0 || !groupRef.current) return;
+    const { p, height } = toPlan(e.point);
+    if (!editing.down(p, e.nativeEvent)) return;
+    e.stopPropagation();
+    // Kéo trên mặt phẳng ngang qua điểm đã nhấn (tính theo hệ trục của tầng) để vật không bị
+    // nhảy do thị sai khi bấm vào nóc tủ, nóc giường…
+    const inverse = groupRef.current.matrixWorld.clone().invert();
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -height);
+    const raycaster = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    const hit = new THREE.Vector3();
+    const drag = editing;
+    if (controls) controls.enabled = false;
+    const move = (ev: PointerEvent) => {
+      const r = gl.domElement.getBoundingClientRect();
+      ndc.set(
+        ((ev.clientX - r.left) / r.width) * 2 - 1,
+        -((ev.clientY - r.top) / r.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(ndc, camera);
+      if (raycaster.ray.clone().applyMatrix4(inverse).intersectPlane(plane, hit)) {
+        drag.move({ x: hit.x, y: hit.z });
+      }
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      if (controls) controls.enabled = true;
+      drag.up();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  const editHandlers = editing
+    ? {
+        onPointerDown,
+        onPointerMove: (e: ThreeEvent<PointerEvent>) => {
+          if (!editing.hover) return;
+          e.stopPropagation();
+          gl.domElement.style.cursor = editing.hover(toPlan(e.point).p) ? 'move' : '';
+        },
+        onPointerOut: () => {
+          gl.domElement.style.cursor = '';
+        },
+        onClick: (e: ThreeEvent<MouseEvent>) => {
+          // Kéo xoay camera xong cũng sinh click — chỉ nhận click gần như đứng yên.
+          if (e.delta > 4) return;
+          e.stopPropagation();
+          editing.click?.(toPlan(e.point).p, e.nativeEvent);
+        },
+      }
+    : {};
+
   return (
-    <group position={[0, y, 0]}>
+    <group ref={groupRef} position={[0, y, 0]} {...editHandlers}>
       {geometry.slab && (
         <mesh geometry={geometry.slab}>
           <meshStandardMaterial
@@ -436,6 +542,28 @@ export function FloorMesh({
           </mesh>
         ))}
       {!ghost && <Stairs3D geometry={geometry.stairs} theme={theme} labels={stairLabels} />}
+      {!ghost && furniture.body && (
+        <mesh geometry={furniture.body}>
+          <meshStandardMaterial color={theme.wall3d} />
+        </mesh>
+      )}
+      {!ghost && furniture.soft && (
+        <mesh geometry={furniture.soft}>
+          <meshStandardMaterial color={theme.door} />
+        </mesh>
+      )}
+      {editing?.outlines?.map((o, i) =>
+        o.points.length >= 2 ? (
+          <Line
+            key={i}
+            points={(o.closed ? [...o.points, o.points[0]!] : o.points).map((p) => toVec3(p, 0.06))}
+            color={SELECTION_COLOR}
+            lineWidth={3}
+            depthTest={false}
+            renderOrder={20}
+          />
+        ) : null,
+      )}
       {label && !ghost && bounds && (
         <TextLabel
           position={[bounds.minX, wallHeight + 0.2, bounds.maxY]}

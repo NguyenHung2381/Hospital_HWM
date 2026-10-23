@@ -35,6 +35,8 @@ import {
 import {
   Connectors,
   floorBounds,
+  FurnitureLayer,
+  FurnitureMark,
   flattenPoints,
   Labels,
   Landmarks,
@@ -47,18 +49,27 @@ import {
   Walls,
   useMapTheme,
   type MapStageHandle,
+  FURNITURE,
 } from '@hwn/map-render';
+import { Annotations, DimensionMark, TextMark } from './annotations';
+import { placeFurniture, type FurniturePlacement } from './furniture';
 import { inOverlay, isTyping, letterOf, onBackspace } from './keyboard';
 import {
   addConnector,
+  addDimension,
+  addFurniture,
   addLandmark,
   addNavEdge,
   addNavNode,
   addOpening,
   addRectWalls,
   addRoom,
+  addText,
   addWall,
+  DEFAULT_NOTE_TEXT,
+  DEFAULT_TEXT_SIZE,
   deleteItems,
+  dimensionOffsetAt,
   endpointsAt,
   findOpeningPlacement,
   itemsInRect,
@@ -72,9 +83,11 @@ import {
   setEndpoints,
   setRoomDestination,
   setRoomVertex,
+  withoutLayers,
   type OpeningPlacement,
 } from './ops';
 import {
+  ACCENT,
   AreaGhost,
   BackgroundImage,
   CalibrationOverlay,
@@ -120,6 +133,8 @@ import { applyMultiDrag, makeMultiDragPlan, selectionParts, type MultiDragPlan }
 const PICK_PX = 8;
 const SNAP_PX = 10;
 const OPENING_REACH_PX = 28;
+/** Con trỏ cách mặt tường trong khoảng (chiều sâu ký hiệu + chừng này px) thì ký hiệu bám tường. */
+const FURNITURE_REACH_PX = 24;
 /** Kéo ít hơn chừng này (px) khi chọn vùng thì coi như click. */
 const MARQUEE_MIN_PX = 4;
 
@@ -136,7 +151,10 @@ type Preview =
   | { kind: 'opening'; placement: OpeningPlacement | null; width: number }
   | { kind: 'connector'; snap: SnapResult; width: number; depth: number }
   | { kind: 'area'; polygon: Point[] | null; existing: boolean }
-  | { kind: 'point'; point: Point };
+  | { kind: 'point'; point: Point }
+  /** Khoảng dời đường kích thước đang đặt (đã bám lưới). */
+  | { kind: 'offset'; offset: number }
+  | { kind: 'furniture'; place: FurniturePlacement };
 
 const FALLBACK_BOUNDS = { minX: 0, minY: 0, maxX: 40, maxY: 30 };
 const NO_PLACEMENT: Pick<BuildingPlacement, 'position' | 'rotation'> = {
@@ -245,6 +263,7 @@ function CanvasView({
   const wallKind = useEditor((s) => s.wallKind);
   const elevatorKind = useEditor((s) => s.elevatorKind);
   const landmarkKind = useEditor((s) => s.landmarkKind);
+  const furnitureKind = useEditor((s) => s.furnitureKind);
   const selection = useEditor((s) => s.selection);
   const peerSelection = useEditor((s) => s.peerSelection);
   const settings = useEditor((s) => s.settings);
@@ -267,6 +286,8 @@ function CanvasView({
   const [navFrom, setNavFrom] = useState<Id | null>(null);
   /** Chiều dài đoạn kế tiếp đang gõ từ bàn phím. */
   const [lengthInput, setLengthInput] = useState('');
+  /** Góc xoay của ký hiệu nội thất kế tiếp khi đặt tự do (không bám tường). */
+  const [furnitureRotation, setFurnitureRotation] = useState(0);
   /** Hai điểm của thước đo. */
   const [measure, setMeasure] = useState<Point[]>([]);
   const [marquee, setMarquee] = useState<{ a: Point; b: Point } | null>(null);
@@ -348,6 +369,12 @@ function CanvasView({
     };
   }, []);
 
+  const { hiddenLayers, lockedLayers } = settings;
+  /** Tầng chỉ gồm các lớp đang hiện (vẽ, bắt dính) / các lớp chọn được (không ẩn, không khoá). */
+  const shown = useMemo(() => withoutLayers(floor, hiddenLayers), [floor, hiddenLayers]);
+  const pickable = useMemo(() => withoutLayers(shown, lockedLayers), [shown, lockedLayers]);
+  const pickableOf = (f: Floor) => withoutLayers(f, [...hiddenLayers, ...lockedLayers]);
+
   const localBounds = useMemo(() => floorBounds(floor) ?? FALLBACK_BOUNDS, [floor]);
   const px = pl.position.x;
   const py = pl.position.y;
@@ -396,7 +423,7 @@ function CanvasView({
     // Shift đảo trạng thái khoá góc trong lúc giữ.
     const lockAngle = settings.snapAngle !== mods.current.shift;
     return {
-      floor,
+      floor: shown,
       radius: px2m(SNAP_PX),
       gridSize: settings.gridSize,
       snapGrid: settings.snapGrid && !free,
@@ -428,6 +455,32 @@ function CanvasView({
   const measureSnap = (p: Point): SnapResult => {
     const from = measure.length === 1 ? measure[0] : undefined;
     return snapPoint(p, { ...snapOptions(from), angleStep: mods.current.shift ? 45 : 0 });
+  };
+
+  /** Điểm đo của đường kích thước (chỉ khoá góc khi giữ Shift). */
+  const dimensionSnap = (p: Point): SnapResult =>
+    snapPoint(p, { ...snapOptions(chain[0]), angleStep: mods.current.shift ? 45 : 0 });
+
+  /** Vị trí đặt ký hiệu nội thất tại con trỏ: bám tường gần nhất, Alt = đặt tự do. */
+  const furniturePlace = (p: Point): FurniturePlacement => {
+    const free = snapPoint(p, { ...snapOptions(), snapObjects: false }).point;
+    if (mods.current.alt)
+      return { position: free, rotation: furnitureRotation, againstWall: false };
+    const place = placeFurniture(
+      shown,
+      FURNITURE[furnitureKind],
+      p,
+      furnitureRotation,
+      px2m(FURNITURE_REACH_PX),
+    );
+    return place.againstWall ? place : { ...place, position: free };
+  };
+
+  /** Khoảng dời đường kích thước đi qua con trỏ `p`, làm tròn theo lưới. */
+  const dimensionOffset = (a: Point, b: Point, p: Point) => {
+    const off = dimensionOffsetAt(a, b, p);
+    const step = settings.snapGrid && !mods.current.alt ? settings.gridSize : 0;
+    return step > 0 ? Math.round(off / step) * step : off;
   };
 
   const reportMeasure = (a: Point, b: Point) =>
@@ -503,6 +556,16 @@ function CanvasView({
       const s = measureSnap(p);
       showSnap(s);
       if (measure.length === 1) reportMeasure(measure[0]!, s.point);
+    } else if (tool === 'dimension') {
+      if (chain.length < 2) showSnap(dimensionSnap(p));
+      else setPreview({ kind: 'offset', offset: dimensionOffset(chain[0]!, chain[1]!, p) });
+    } else if (tool === 'furniture') {
+      setPreview({ kind: 'furniture', place: furniturePlace(p) });
+    } else if (tool === 'text') {
+      setPreview({
+        kind: 'point',
+        point: snapPoint(p, { ...snapOptions(), snapObjects: false }).point,
+      });
     } else if (tool === 'navNode' || tool === 'navEdge') {
       const nodeId = hitNavNode(floor, p, px2m(PICK_PX));
       const node = nodeId ? floor.navGraph.nodes.find((n) => n.id === nodeId) : undefined;
@@ -532,7 +595,7 @@ function CanvasView({
         point: snapPoint(p, { ...snapOptions(), snapObjects: false }).point,
       });
     } else if (tool === 'select') {
-      const hit = hitTest(floor, p, px2m(PICK_PX), { nav: navVisible });
+      const hit = hitTest(pickable, p, px2m(PICK_PX), { nav: navVisible });
       setHoverItem((prev) => ((prev && hit && sameRef(prev, hit)) || prev === hit ? prev : hit));
       const ph = hit ? null : hitPeer(toSite(placed, p));
       setPeerHover((prev) =>
@@ -551,7 +614,7 @@ function CanvasView({
   const hitPeer = (ps: Point): { peer: CanvasPeer; ref: ItemRef } | null => {
     for (let i = peers.length - 1; i >= 0; i--) {
       const peer = peers[i]!;
-      const ref = hitTest(peer.floor, fromSite(peerPlaced(peer), ps), px2m(PICK_PX), {
+      const ref = hitTest(pickableOf(peer.floor), fromSite(peerPlaced(peer), ps), px2m(PICK_PX), {
         nav: navVisible,
       });
       if (ref) return { peer, ref };
@@ -630,7 +693,7 @@ function CanvasView({
       gesture.current = { kind: 'roomVertex', roomId: vertex.roomId, index: vertex.index };
       return;
     }
-    const hit = hitTest(floor, p, tol, { nav: navVisible });
+    const hit = hitTest(pickable, p, tol, { nav: navVisible });
     const peerHit = hit ? null : hitPeer(toSite(placed, p));
     if (peerHit) {
       setHoverItem(null);
@@ -688,7 +751,7 @@ function CanvasView({
       return;
     }
     const mode = g.end.x >= g.start.x ? 'contain' : 'cross';
-    const refs = itemsInRect(floor, r, mode, { nav: navVisible });
+    const refs = itemsInRect(pickable, r, mode, { nav: navVisible });
     if (!g.additive) select(refs);
     else
       select(
@@ -705,7 +768,7 @@ function CanvasView({
     for (const peer of peers) {
       const box = boundsOf(corners.map((c) => fromSite(peerPlaced(peer), c)));
       if (!box) continue;
-      const found = itemsInRect(peer.floor, box, mode, { nav: navVisible });
+      const found = itemsInRect(pickableOf(peer.floor), box, mode, { nav: navVisible });
       if (!g.additive) {
         if (found.length) selectPeer(peer.buildingId, peer.floor.id, found, 'replace');
         continue;
@@ -829,6 +892,43 @@ function CanvasView({
         return;
       }
 
+      case 'dimension': {
+        if (chain.length < 2) {
+          const s = dimensionSnap(p);
+          if (!chain[0] || !pointsEqual(s.point, chain[0], 1e-6)) setChain([...chain, s.point]);
+          return;
+        }
+        const [a, b] = chain as [Point, Point];
+        let id = '';
+        edit((_, f) => {
+          id = addDimension(f, a, b, dimensionOffset(a, b, p))?.id ?? '';
+        });
+        if (id) select([{ type: 'annotation', id }]);
+        setChain([]);
+        return;
+      }
+
+      case 'furniture': {
+        const place = furniturePlace(p);
+        let id = '';
+        edit((_, f) => {
+          id = addFurniture(f, furnitureKind, place.position, place.rotation).id;
+        });
+        setFurnitureRotation(place.rotation);
+        select([{ type: 'furniture', id }]);
+        return;
+      }
+
+      case 'text': {
+        const s = snapPoint(p, { ...snapOptions(), snapObjects: false });
+        let id = '';
+        edit((_, f) => {
+          id = addText(f, s.point).id;
+        });
+        select([{ type: 'annotation', id }]);
+        return;
+      }
+
       case 'roomAuto': {
         const existing = roomAt(p);
         if (existing) {
@@ -941,6 +1041,25 @@ function CanvasView({
     if (e.isComposing || inOverlay(e) || isTyping(e)) return;
     // Lớp Ngoài trời tự xử lý phím của nó.
     if (siteModeRef.current) return;
+
+    // Đang đặt nội thất: Shift+R xoay ký hiệu sắp đặt (thay cho xoay vùng chọn).
+    if (
+      down &&
+      tool === 'furniture' &&
+      e.shiftKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      letterOf(e) === 'r'
+    ) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const next = (furnitureRotation + 90) % 360;
+      setFurnitureRotation(next);
+      if (preview?.kind === 'furniture' && !preview.place.againstWall) {
+        setPreview({ kind: 'furniture', place: { ...preview.place, rotation: next } });
+      }
+      return;
+    }
 
     if (e.code === 'Space') {
       // Chặn cả keyup để nút đang focus không bị "bấm" bởi phím Space.
@@ -1074,13 +1193,19 @@ function CanvasView({
               theme={theme}
             />
           )}
-          <Rooms rooms={floor.rooms} departments={building.departments} theme={theme} />
-          <Connectors connectors={floor.connectors} theme={theme} selectedId={connectorSelected} />
-          <Walls floor={floor} theme={theme} />
+          <Rooms rooms={shown.rooms} departments={building.departments} theme={theme} />
+          <Connectors connectors={shown.connectors} theme={theme} selectedId={connectorSelected} />
+          {shown.furniture && shown.furniture.length > 0 && (
+            <FurnitureLayer furniture={shown.furniture} theme={theme} />
+          )}
+          <Walls floor={shown} theme={theme} />
           {navVisible && <NavGraph floor={floor} theme={theme} />}
-          <Labels floor={floor} theme={theme} />
-          {floor.landmarks && floor.landmarks.length > 0 && (
-            <Landmarks landmarks={floor.landmarks} theme={theme} />
+          <Labels floor={shown} theme={theme} />
+          {shown.landmarks && shown.landmarks.length > 0 && (
+            <Landmarks landmarks={shown.landmarks} theme={theme} />
+          )}
+          {shown.annotations && shown.annotations.length > 0 && (
+            <Annotations annotations={shown.annotations} theme={theme} />
           )}
         </LocalFrame>
       </Layer>
@@ -1109,7 +1234,7 @@ function CanvasView({
             />
           )}
           <RoomDestinations
-            floor={floor}
+            floor={shown}
             selectedRoomId={
               selection.length === 1 && selection[0]!.type === 'room' ? selection[0]!.id : null
             }
@@ -1140,6 +1265,40 @@ function CanvasView({
               b={snapPreview.point}
               thickness={settings.wallThickness}
               theme={theme}
+            />
+          )}
+          {tool === 'dimension' && chain[0] && (chain[1] ?? snapPreview) && (
+            <DimensionMark
+              dim={
+                chain[1]
+                  ? {
+                      start: chain[0],
+                      end: chain[1],
+                      offset: preview?.kind === 'offset' ? preview.offset : 0,
+                    }
+                  : { start: chain[0], end: snapPreview!.point, offset: 0 }
+              }
+              theme={theme}
+              color={ACCENT}
+            />
+          )}
+          {tool === 'furniture' && preview?.kind === 'furniture' && (
+            <FurnitureMark
+              item={{
+                kind: furnitureKind,
+                ...FURNITURE[furnitureKind],
+                ...preview.place,
+              }}
+              theme={theme}
+              color={ACCENT}
+              opacity={0.7}
+            />
+          )}
+          {tool === 'text' && preview?.kind === 'point' && (
+            <TextMark
+              note={{ position: preview.point, text: DEFAULT_NOTE_TEXT, size: DEFAULT_TEXT_SIZE }}
+              theme={theme}
+              opacity={0.45}
             />
           )}
           {tool === 'measure' && (

@@ -91,19 +91,54 @@ bước chân" đếm bước bằng cảm biến gia tốc; la bàn và bước
 Mã nguồn: [apps/admin/src/editor](apps/admin/src/editor). Thao tác thuần (thêm/sửa/xoá, snap, hit test) nằm trong
 `ops.ts` / `snap.ts` và có unit test; store zustand giữ bản nháp + lịch sử undo/redo.
 
-| Phím                           | Việc                                                         |
-| ------------------------------ | ------------------------------------------------------------ |
-| `V` / `H`                      | Chọn / di chuyển bản đồ (hoặc giữ Space, chuột giữa)         |
-| `W`                            | Vẽ tường (Enter / Esc / click lại điểm cuối để dừng)         |
-| `D` / `N` / `E`                | Cửa đi / cửa sổ / cửa ra vào chính                           |
-| `L` / `S` / `K`                | Thang máy / thang bộ / thang cuốn                            |
-| `R` / `F`                      | Vẽ phòng theo đỉnh / click vào vùng kín để tạo phòng         |
-| `P` / `J`                      | Thêm điểm / nối cạnh đồ thị đi lại                           |
-| `M`                            | Hiệu chỉnh tỉ lệ ảnh nền                                     |
-| `Ctrl+Z` / `Ctrl+Y`            | Hoàn tác / làm lại                                           |
-| `Ctrl+C` / `Ctrl+V` / `Ctrl+D` | Copy / dán (dán sang tầng khác giữ nguyên vị trí) / nhân bản |
-| `Delete`, phím mũi tên         | Xoá / dịch đối tượng theo ô lưới (Shift = ×10)               |
-| `Ctrl+S`                       | Lưu (kiểm tra lỗi trước khi gửi)                             |
+| Phím                           | Việc                                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------- |
+| `V` / `H`                      | Chọn / di chuyển bản đồ (hoặc giữ Space, chuột giữa)                          |
+| `W`                            | Vẽ tường (Enter / Esc / click lại điểm cuối để dừng)                          |
+| `D` / `N` / `E`                | Cửa đi / cửa sổ / cửa ra vào chính                                            |
+| `L` / `S` / `K`                | Thang máy / thang bộ / thang cuốn                                             |
+| `R` / `F`                      | Vẽ phòng theo đỉnh / click vào vùng kín để tạo phòng                          |
+| `P` / `J`                      | Thêm điểm / nối cạnh đồ thị đi lại                                            |
+| `M`                            | Hiệu chỉnh tỉ lệ ảnh nền                                                      |
+| `I`                            | Thư viện ký hiệu: giường bệnh, ghế chờ, thiết bị y tế… (nhấn lại để đổi loại) |
+| `Q` / `X`                      | Ghi kích thước (click 2 điểm + click đặt đường) / chú thích chữ               |
+| `Ctrl+Z` / `Ctrl+Y`            | Hoàn tác / làm lại                                                            |
+| `Ctrl+C` / `Ctrl+V` / `Ctrl+D` | Copy / dán (dán sang tầng khác giữ nguyên vị trí) / nhân bản                  |
+| `Delete`, phím mũi tên         | Xoá / dịch đối tượng theo ô lưới (Shift = ×10)                                |
+| `Ctrl+S`                       | Lưu (kiểm tra lỗi trước khi gửi)                                              |
+
+**Ghi chú & lớp:** đường kích thước và chú thích chữ lưu trong `Floor.annotations` (chỉ editor vẽ, app người
+dùng bỏ qua). Bảng **Lớp** (tab Thuộc tính, khi không chọn gì) ẩn hoặc khoá từng lớp: tường & cửa, phòng, thang,
+mốc, kích thước & chữ — lớp khoá vẫn hiện và bắt dính được nhưng không chọn / sửa được.
+
+**Nội thất & thiết bị:** công cụ `I` mở thư viện 17 ký hiệu ([furniture.ts](apps/admin/src/editor/furniture.ts)) —
+giường bệnh, giường ICU, nôi, cáng, giường khám, ghế, dãy ghế chờ, bàn, quầy, tủ, ghế nha khoa, máy siêu âm, X-quang,
+CT / MRI, cột truyền dịch, bồn rửa, bồn cầu. Đặt gần tường thì ký hiệu tự quay lưng vào tường và áp sát (Alt = đặt tự
+do, Shift+R = xoay trước khi đặt); kích thước, góc xoay sửa ở bảng bên phải. Lưu trong `Floor.furniture`, có lớp riêng,
+có trong bản xuất. App người dùng vẽ nội thất trên bản đồ 2D / 3D.
+
+**Nội thất là vật cản khi chỉ đường:** "Tự sinh cho tầng này" coi nội thất (kèm khoảng hở 0,3 m) như tường, nên đường tâm
+hành lang đi vòng và điểm đích tự sinh của phòng không rơi lên giường / bàn. Với đồ thị vẽ tay hoặc sinh trước khi kê đồ,
+cạnh xuyên qua nội thất bị cộng thêm 100 m chi phí (`FURNITURE_PENALTY`) — tuyến ưu tiên lối khác nhưng vẫn đi được nếu
+không còn lối nào — và tab Kiểm tra báo cảnh báo `NAV_THROUGH_FURNITURE` (bấm để chọn món nội thất đó).
+
+**Căn chỉnh & chia đều:** chọn từ 2 đối tượng → bảng bên phải có 6 nút căn mép trái / giữa / phải / trên / giữa /
+dưới theo hộp bao chung; từ 3 đối tượng có thêm **Chia đều ngang / dọc** (giữ hai đối tượng ngoài cùng, khoảng hở giữa
+các đối tượng bằng nhau). Mỗi lần là một bước Hoàn tác; ô cửa đi theo tường nên không tính.
+
+**Sửa trong 3D:** bật **Xem 3D** rồi dùng công cụ Chọn (`V`) ngay trong cảnh 3D — click để chọn tường, ô cửa, phòng,
+thang, mốc, nội thất (Shift+click chọn thêm), kéo để dời trên mặt sàn (bám lưới, Hoàn tác như 2D); kéo chỗ trống để xoay
+camera. Vùng chọn đồng bộ với khung 2D và bảng thuộc tính, viền cam hiện trong cả hai; Delete, Shift+R, phím mũi tên dùng
+được như trong 2D ([edit3d.ts](apps/admin/src/editor/edit3d.ts), `Floor3DEditor` trong `@hwn/map-render/3d`). Nội thất
+dựng thành khối theo chiều cao từng loại (giường 0,55 m, tủ 1,8 m, cột truyền dịch 1,9 m…).
+
+**Xuất / nhập bản vẽ:** nút **Xuất** (trang Vẽ toà nhà) xuất tầng đang mở theo các lớp đang hiện — PNG
+(50 px/m), SVG vector (tỉ lệ 1:100, mở đúng tỉ lệ trong Illustrator / Inkscape) hoặc In / PDF (khổ A3 vừa trang,
+chọn "Lưu dưới dạng PDF" trong hộp thoại in); bản xuất có tiêu đề, thước tỉ lệ và hướng Bắc
+([exportPlan.ts](apps/admin/src/editor/exportPlan.ts)). Bảng "Ảnh mặt bằng (nền)" nhận cả file **DXF**
+([dxf.ts](apps/admin/src/editor/dxf.ts)): LINE, POLYLINE (kể cả cung), CIRCLE, ARC, TEXT / MTEXT, block (INSERT) và
+DIMENSION được dựng thành nền vector đúng kích thước thật (đơn vị lấy từ `$INSUNITS`, không có thì đoán). DWG chưa
+đọc được — lưu lại thành DXF trong AutoCAD.
 
 **Nhiều toà nhà:** hai trang vẽ không có ô chọn toà — trang Vẽ toà nhà đổi toà bằng các tab tên toà; nút
 **+ Thêm toà** (đầu trang) tạo toà mới trong cơ sở đang xem, bảng "Toà nhà" (tab Thuộc tính) đổi tên (lưu cùng nút

@@ -1,5 +1,11 @@
 import { groundFloor } from './campus';
-import { isSelfIntersecting, pointInPolygon, polygonArea, wallLength } from './geometry';
+import {
+  furnitureAcross,
+  isSelfIntersecting,
+  pointInPolygon,
+  polygonArea,
+  wallLength,
+} from './geometry';
 import type { Building, Floor, Id } from './types';
 
 export type IssueSeverity = 'error' | 'warning';
@@ -23,6 +29,7 @@ export type IssueCode =
   | 'NAV_DISCONNECTED'
   | 'DUPLICATE_ROOM_CODE'
   | 'DESTINATION_OUTSIDE_ROOM'
+  | 'NAV_THROUGH_FURNITURE'
   | 'EMPTY_NAME'
   | 'EXTERIOR_INVALID_SHAPE';
 
@@ -184,6 +191,25 @@ export function validateFloor(floor: Floor, departmentIds?: ReadonlySet<Id>): Va
         'CONNECTOR_NOT_IN_GRAPH',
         `"${connector.name}" chưa có trong đồ thị đi lại`,
         connector.id,
+      );
+    }
+  }
+
+  // Cạnh đi xuyên qua nội thất (thường do kê đồ sau khi đã sinh đồ thị).
+  if (floor.furniture?.length) {
+    const pos = new Map(floor.navGraph.nodes.map((n) => [n.id, n.position]));
+    const reported = new Set<Id>();
+    for (const e of floor.navGraph.edges) {
+      const a = pos.get(e.from);
+      const b = pos.get(e.to);
+      const f = a && b ? furnitureAcross(floor.furniture, a, b) : undefined;
+      if (!f || reported.has(f.id)) continue;
+      reported.add(f.id);
+      push(
+        'warning',
+        'NAV_THROUGH_FURNITURE',
+        'Đồ thị đi lại xuyên qua nội thất / thiết bị — bấm "Tự sinh cho tầng này" hoặc dời cạnh để chỉ đường đi vòng',
+        f.id,
       );
     }
   }

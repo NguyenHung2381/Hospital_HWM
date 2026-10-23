@@ -181,6 +181,19 @@ export const TOOL_GROUPS: ToolDef[][] = [
       ),
       hint: 'Chọn loại mốc (quầy thông tin, máy lấy số, ATM, nhà vệ sinh…) ở menu cạnh nút · Nhấn O lần nữa để đổi loại · Click để đặt mốc · Sửa tên ở bảng bên phải · Người dùng tìm được và được chỉ đường tới mốc',
     },
+    {
+      tool: 'furniture',
+      label: 'Nội thất & thiết bị',
+      key: 'I',
+      icon: icon(
+        <>
+          <rect x="6" y="3" width="12" height="18" rx="1.5" />
+          <rect x="8" y="5" width="8" height="3" rx="1" fill="currentColor" fillOpacity="0.3" />
+          <path d="M6 11h12" />
+        </>,
+      ),
+      hint: 'Chọn ký hiệu (giường bệnh, ghế chờ, máy chụp…) ở menu cạnh nút · Nhấn I lần nữa để đổi loại · Click để đặt — gần tường thì tự quay lưng vào tường và áp sát · Shift+R: xoay 90° trước khi đặt · Alt: đặt tự do · Sửa kích thước, góc xoay ở bảng bên phải',
+    },
   ],
   [
     {
@@ -221,6 +234,30 @@ export const TOOL_GROUPS: ToolDef[][] = [
         </>,
       ),
       hint: 'Click 2 điểm để đo khoảng cách (không thay đổi bản đồ) · Click tiếp để đo lại · Shift: khoá góc 45° · Esc để xoá',
+    },
+    {
+      tool: 'dimension',
+      label: 'Ghi kích thước',
+      key: 'Q',
+      icon: icon(
+        <>
+          <path d="M4 7v10M20 7v10M4 12h16" />
+          <path d="M6 14l4-4M14 14l4-4" />
+        </>,
+      ),
+      hint: 'Click 2 điểm cần ghi kích thước (bắt dính đầu / thân tường) · Di chuột để đặt đường kích thước rồi click lần 3 · Shift: khoá góc 45° · Backspace: bỏ điểm cuối · Esc để huỷ',
+    },
+    {
+      tool: 'text',
+      label: 'Chú thích chữ',
+      key: 'X',
+      icon: icon(
+        <>
+          <path d="M5 7V5h14v2" />
+          <path d="M12 5v14M9 19h6" />
+        </>,
+      ),
+      hint: 'Click để đặt chú thích · Sửa nội dung, cỡ chữ, góc xoay ở bảng bên phải',
     },
     {
       tool: 'calibrate',

@@ -21,6 +21,7 @@ import { useMapTheme, type ThemeSetting } from '../core/hooks';
 import { flattenPoints } from '../core/route';
 import { withAlpha, type MapTheme } from '../core/theme';
 import { LocalFrame, MapStage, usePx, useViewportScale } from './MapStage';
+import { FurnitureLayer } from './furniture';
 import { Connectors, Labels, Landmarks, Rooms, Walls } from './layers';
 
 export interface SiteBuilding {
@@ -84,6 +85,9 @@ export function SiteBuildings({
                 <>
                   <Rooms rooms={b.floor.rooms} departments={b.departments} theme={theme} />
                   <Connectors connectors={b.floor.connectors} theme={theme} />
+                  {showDetail && !!b.floor.furniture?.length && (
+                    <FurnitureLayer furniture={b.floor.furniture} theme={theme} />
+                  )}
                   <Walls floor={b.floor} theme={theme} />
                   {showDetail && <Labels floor={b.floor} theme={theme} />}
                   {detail && !!b.floor.landmarks?.length && (

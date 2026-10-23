@@ -33,7 +33,7 @@ import {
   VEHICLE_ACCESS_STYLE,
 } from '../two-d/siteLayers';
 import type { MapLocation } from '../types';
-import { FitCamera, FloorMesh, Route3D, TextLabel } from './Building3D';
+import { FitCamera, FloorMesh, Route3D, TextLabel, type Floor3DEditor } from './Building3D';
 import { prism, toVec3, type Vec3 } from './geometry';
 import { buildSiteMeshes, disposeSiteMeshes, PLINTH } from './site3d';
 import { stairLayouts } from './stairs';
@@ -82,6 +82,8 @@ export interface Campus3DProps {
   destinationLabel?: string;
   onRoomClick?: (room: Room) => void;
   onBuildingClick?: (buildingId: Id) => void;
+  /** Chọn / kéo đối tượng trên tầng `editor.floorId` của toà đang xem (theo hệ trục của toà). */
+  editor?: Floor3DEditor | null;
   theme?: ThemeSetting;
   className?: string;
   style?: CSSProperties;
@@ -104,6 +106,7 @@ export function Campus3D({
   destinationLabel,
   onRoomClick,
   onBuildingClick,
+  editor,
   theme: themeSetting,
   className,
   style,
@@ -217,6 +220,7 @@ export function Campus3D({
             destinationLabel={destinationLabel}
             onRoomClick={b.id === focusBuildingId ? onRoomClick : undefined}
             onClick={onBuildingClick ? () => onBuildingClick(b.id) : undefined}
+            editor={b.id === focusBuildingId ? editor : null}
           />
         ))}
         <OrbitControls makeDefault enableDamping maxPolarAngle={Math.PI * 0.47} />
@@ -392,6 +396,7 @@ function PlacedBuilding3D({
   destinationLabel,
   onRoomClick,
   onClick,
+  editor,
 }: {
   building: Campus3DBuilding;
   cut: number;
@@ -404,6 +409,7 @@ function PlacedBuilding3D({
   destinationLabel?: string;
   onRoomClick?: (room: Room) => void;
   onClick?: () => void;
+  editor?: Floor3DEditor | null;
 }) {
   const { placement } = building;
   const floors = useMemo(
@@ -455,6 +461,7 @@ function PlacedBuilding3D({
             wallHeightScale={isCut ? CUT_WALL_SCALE : 1}
             stairs={stairs}
             onRoomClick={isCut ? onRoomClick : undefined}
+            editor={isCut && editor?.floorId === f.id ? editor : null}
           />
         );
       })}

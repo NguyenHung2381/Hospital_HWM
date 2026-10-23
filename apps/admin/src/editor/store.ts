@@ -7,13 +7,16 @@ import type {
   DoorStyle,
   ElevatorKind,
   Floor,
+  FurnitureKind,
   Id,
   LandmarkKind,
   WallKind,
 } from '@hwn/map-core';
 import {
   DEFAULT_SETTINGS,
+  LAYER_OF,
   sameRef,
+  TOOL_LAYER,
   type Clipboard,
   type EditorSettings,
   type ItemRef,
@@ -76,6 +79,8 @@ export interface EditorState {
   elevatorKind: ElevatorKind;
   /** Loại mốc dùng khi đặt mốc mới (chọn ở thanh công cụ). */
   landmarkKind: LandmarkKind;
+  /** Ký hiệu nội thất / thiết bị đang chọn trong thư viện. */
+  furnitureKind: FurnitureKind;
   /** Vùng chọn trên toà đang mở. */
   selection: ItemRef[];
   /** Vùng chọn thêm trên các toà khác (chọn nhiều toà cùng lúc). */
@@ -118,6 +123,8 @@ export interface EditorState {
   setElevatorKind(kind: ElevatorKind): void;
   /** Chọn loại mốc mới (đồng thời bật công cụ mốc). */
   setLandmarkKind(kind: LandmarkKind): void;
+  /** Chọn ký hiệu trong thư viện (đồng thời bật công cụ đặt nội thất). */
+  setFurnitureKind(kind: FurnitureKind): void;
   /** Chọn trên toà đang mở. `replace` bỏ luôn vùng chọn ở các toà khác. */
   select(refs: ItemRef[], mode?: 'replace' | 'toggle'): void;
   /** Đặt / bật tắt vùng chọn trên một toà khác. */
@@ -168,6 +175,8 @@ function pruneSelection(building: Building, floorId: Id | null, selection: ItemR
     connector: floor.connectors,
     room: floor.rooms,
     landmark: floor.landmarks ?? [],
+    annotation: floor.annotations ?? [],
+    furniture: floor.furniture ?? [],
     navNode: floor.navGraph.nodes,
     navEdge: floor.navGraph.edges,
   };
@@ -192,6 +201,24 @@ function prunePeers(
     if (refs.length) next[id] = refs === sel.refs ? sel : { ...sel, refs };
   }
   return changed ? next : peers;
+}
+
+/** Bật công cụ vẽ thì hiện lại lớp mà nó vẽ vào (nếu đang ẩn). */
+function withToolLayer(settings: EditorSettings, tool: Tool): EditorSettings {
+  const layer = TOOL_LAYER[tool];
+  return layer && settings.hiddenLayers.includes(layer)
+    ? { ...settings, hiddenLayers: settings.hiddenLayers.filter((l) => l !== layer) }
+    : settings;
+}
+
+/** Bỏ khỏi vùng chọn các đối tượng thuộc lớp đang ẩn / khoá. */
+function pruneLayers(settings: EditorSettings, refs: ItemRef[]): ItemRef[] {
+  const blocked = new Set([...settings.hiddenLayers, ...settings.lockedLayers]);
+  const free = (r: ItemRef) => {
+    const layer = LAYER_OF[r.type];
+    return !layer || !blocked.has(layer);
+  };
+  return refs.every(free) ? refs : refs.filter(free);
 }
 
 const sortedFirstFloorId = (b: Building) =>
@@ -287,6 +314,7 @@ export const useEditor = create<EditorState>((set, get) => {
     wallKind: 'brick',
     elevatorKind: 'passenger',
     landmarkKind: 'info',
+    furnitureKind: 'bed',
     selection: [],
     peerSelection: {},
     past: [],
@@ -402,11 +430,11 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     setTool(tool) {
-      set({ tool });
+      set({ tool, settings: withToolLayer(get().settings, tool) });
     },
 
     setDoorStyle(doorStyle) {
-      set({ doorStyle, tool: 'door' });
+      set({ doorStyle, tool: 'door', settings: withToolLayer(get().settings, 'door') });
     },
 
     setWallKind(wallKind) {
@@ -414,16 +442,35 @@ export const useEditor = create<EditorState>((set, get) => {
       set({
         wallKind,
         tool: tool === 'wallRect' ? tool : 'wall',
-        settings: { ...settings, wallThickness: WALL_KIND_DEFAULTS[wallKind].thickness },
+        settings: withToolLayer(
+          { ...settings, wallThickness: WALL_KIND_DEFAULTS[wallKind].thickness },
+          'wall',
+        ),
       });
     },
 
     setElevatorKind(elevatorKind) {
-      set({ elevatorKind, tool: 'elevator' });
+      set({
+        elevatorKind,
+        tool: 'elevator',
+        settings: withToolLayer(get().settings, 'elevator'),
+      });
     },
 
     setLandmarkKind(landmarkKind) {
-      set({ landmarkKind, tool: 'landmark' });
+      set({
+        landmarkKind,
+        tool: 'landmark',
+        settings: withToolLayer(get().settings, 'landmark'),
+      });
+    },
+
+    setFurnitureKind(furnitureKind) {
+      set({
+        furnitureKind,
+        tool: 'furniture',
+        settings: withToolLayer(get().settings, 'furniture'),
+      });
     },
 
     select(refs, mode = 'replace') {
@@ -534,7 +581,14 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     setSettings(patch) {
-      set({ settings: { ...get().settings, ...patch } });
+      const s = get();
+      const settings = { ...s.settings, ...patch };
+      const peerSelection: Record<Id, PeerSelection> = {};
+      for (const [id, sel] of Object.entries(s.peerSelection)) {
+        const refs = pruneLayers(settings, sel.refs);
+        if (refs.length) peerSelection[id] = refs === sel.refs ? sel : { ...sel, refs };
+      }
+      set({ settings, selection: pruneLayers(settings, s.selection), peerSelection });
     },
 
     setFrames(frames) {

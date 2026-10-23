@@ -5,7 +5,8 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { type Connector, type Floor, type Point } from '@hwn/map-core';
+import { rotatePoint, type Connector, type Floor, type Furniture, type Point } from '@hwn/map-core';
+import { furnitureShapes } from '../core/furniture';
 import { floorBounds } from '../core/viewport';
 import { layoutWall, segmentQuad, wallKindOf } from '../core/walls';
 
@@ -114,4 +115,40 @@ export function buildSlabGeometry(
 /** Thang máy: hộp giếng thang. Thang bộ/thang cuốn dựng riêng trong `stairs.ts`. */
 export function buildElevatorGeometry(connector: Connector, height: number): THREE.BufferGeometry {
   return prism(connector.polygon, 0, height);
+}
+
+/** Số cạnh của đa giác xấp xỉ hình elip khi dựng khối. */
+const ELLIPSE_SEGMENTS = 20;
+
+/**
+ * Nội thất / thiết bị: mỗi hình có tô của ký hiệu 2D thành một khối đứng theo cao độ của nó. Phần
+ * "nhạt" (gối, nệm, bàn máy) tách riêng để tô màu khác.
+ */
+export function buildFurnitureGeometry(items: readonly Furniture[]): {
+  body: THREE.BufferGeometry | null;
+  soft: THREE.BufferGeometry | null;
+} {
+  const body: THREE.BufferGeometry[] = [];
+  const soft: THREE.BufferGeometry[] = [];
+  for (const f of items) {
+    const place = (p: Point) =>
+      rotatePoint({ x: f.position.x + p.x, y: f.position.y + p.y }, f.position, f.rotation ?? 0);
+    for (const s of furnitureShapes(f.kind, f.width, f.depth)) {
+      if (s.kind === 'line' || !s.z) continue;
+      const outline =
+        s.kind === 'rect'
+          ? [
+              { x: s.x, y: s.y },
+              { x: s.x + s.w, y: s.y },
+              { x: s.x + s.w, y: s.y + s.h },
+              { x: s.x, y: s.y + s.h },
+            ]
+          : Array.from({ length: ELLIPSE_SEGMENTS }, (_, i) => {
+              const a = (i / ELLIPSE_SEGMENTS) * Math.PI * 2;
+              return { x: s.cx + s.rx * Math.cos(a), y: s.cy + s.ry * Math.sin(a) };
+            });
+      (s.fill === 'soft' ? soft : body).push(prism(outline.map(place), s.z[0], s.z[1]));
+    }
+  }
+  return { body: mergeAll(body), soft: mergeAll(soft) };
 }

@@ -4,6 +4,7 @@ export * from './core/theme';
 export * from './core/hooks';
 export * from './core/viewport';
 export * from './core/walls';
+export * from './core/wallJoints';
 export * from './core/route';
 export {
   invertFrame,

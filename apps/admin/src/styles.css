@@ -1,15 +1,7 @@
 :root {
-  --color-primary: #0f766e;
-  --color-bg: #f1f5f9;
-  --color-surface: #ffffff;
-  --color-sidebar: #0f172a;
-  --color-sidebar-text: #cbd5e1;
-  --color-text: #0f172a;
-  --color-muted: #64748b;
-  --color-border: #e2e8f0;
-  --color-error: #dc2626;
-  --color-warning: #d97706;
-  --color-ok: #059669;
+  /* Màu lấy từ @hwn/theme/tokens.css (import trong main.tsx). */
+  --color-sidebar: var(--color-gray-900);
+  --color-sidebar-text: var(--color-gray-300);
   --radius: 10px;
   font-family:
     system-ui,
@@ -23,16 +15,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-primary: #14b8a6;
-    --color-bg: #0b1120;
-    --color-surface: #111827;
-    --color-sidebar: #020617;
-    --color-text: #e2e8f0;
-    --color-muted: #94a3b8;
-    --color-border: #1f2937;
-    --color-error: #f87171;
-    --color-warning: #fbbf24;
-    --color-ok: #34d399;
+    --color-sidebar: #070e13;
   }
 }
 
@@ -82,7 +65,7 @@ h2 {
 .brand {
   font-weight: 700;
   font-size: 1.1rem;
-  color: #fff;
+  color: var(--color-white);
   padding: 0 12px;
 }
 
@@ -99,7 +82,7 @@ h2 {
 
 .nav-link.active {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-white);
 }
 
 .content {
@@ -181,7 +164,7 @@ h2 {
 }
 
 .issues .warning {
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 
 .dot {
@@ -663,5 +646,5 @@ h2 {
 .site-levels button.active {
   background: var(--color-primary);
   border-color: var(--color-primary);
-  color: #fff;
+  color: var(--color-white);
 }

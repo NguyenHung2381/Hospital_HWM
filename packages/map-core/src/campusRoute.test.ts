@@ -14,6 +14,7 @@ import {
 import {
   buildSiteWalkGraph,
   campusRouteToSiteRoute,
+  createCampusRouter,
   findCampusRoute,
   isWalkable,
   levelOfFloorId,
@@ -441,5 +442,33 @@ describe('chỉ đường liên toà', () => {
     expect(site.to.position.y).toBeGreaterThan(35);
     expect(site.entry?.floorId).toBe('L1');
     expect(site.instructions.every((i) => levelOfFloorId(i.floorId) !== null)).toBe(true);
+  });
+});
+
+describe('createCampusRouter', () => {
+  const from = { buildingId: SAMPLE_BUILDING_ID, floorId: 'floor_1', position: { x: 20, y: 10 } };
+
+  it('dùng lại bộ tìm đường cho nhiều lần tìm, cùng kết quả như findCampusRoute', () => {
+    const { campus, buildings } = setup();
+    const router = createCampusRouter(campus, buildings);
+    for (const to of [
+      { buildingId: SAMPLE_ANNEX_ID, roomId: 'b_floor_1_room_bot1' },
+      { buildingId: SAMPLE_BUILDING_ID, roomId: 'floor_1_room_top1' },
+    ]) {
+      expect(router.route(from, to)).toEqual(findCampusRoute(campus, buildings, from, to));
+    }
+  });
+
+  it('báo đúng lỗi khi phòng đích chưa có trong đồ thị (không nuốt thành "không có đường")', () => {
+    const { campus, buildings, annex } = setup();
+    for (const f of annex.floors) {
+      f.navGraph.nodes = f.navGraph.nodes.filter((n) => n.refId !== 'b_floor_1_room_bot1');
+    }
+    expect(() =>
+      findCampusRoute(campus, buildings, from, {
+        buildingId: SAMPLE_ANNEX_ID,
+        roomId: 'b_floor_1_room_bot1',
+      }),
+    ).toThrow(expect.objectContaining({ code: 'ROOM_NOT_IN_GRAPH' }));
   });
 });

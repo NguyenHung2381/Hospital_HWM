@@ -23,6 +23,7 @@ import { withAlpha, type MapTheme } from '../core/theme';
 import { LocalFrame, MapStage, usePx, useViewportScale } from './MapStage';
 import { FurnitureLayer } from './furniture';
 import { Connectors, Labels, Landmarks, Rooms, Walls } from './layers';
+import { palette } from '@hwn/theme';
 
 export interface SiteBuilding {
   placement: BuildingPlacement;
@@ -36,7 +37,7 @@ export interface SiteBuilding {
   dim?: boolean;
 }
 
-const SELECT = '#f97316';
+const SELECT = palette.accent;
 
 export function SiteBuildings({
   buildings,

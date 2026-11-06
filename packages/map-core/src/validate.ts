@@ -6,6 +6,7 @@ import {
   polygonArea,
   wallLength,
 } from './geometry';
+import { crossesWall, solidWallObstacles } from './obstacles';
 import type { Building, Floor, Id } from './types';
 
 export type IssueSeverity = 'error' | 'warning';
@@ -30,6 +31,7 @@ export type IssueCode =
   | 'DUPLICATE_ROOM_CODE'
   | 'DESTINATION_OUTSIDE_ROOM'
   | 'NAV_THROUGH_FURNITURE'
+  | 'NAV_EDGE_THROUGH_WALL'
   | 'EMPTY_NAME'
   | 'EXTERIOR_INVALID_SHAPE';
 
@@ -211,6 +213,23 @@ export function validateFloor(floor: Floor, departmentIds?: ReadonlySet<Id>): Va
         'Đồ thị đi lại xuyên qua nội thất / thiết bị — bấm "Tự sinh cho tầng này" hoặc dời cạnh để chỉ đường đi vòng',
         f.id,
       );
+    }
+  }
+
+  // Cạnh đi xuyên tường (không qua ô cửa) — thường do vẽ tay hoặc dời tường sau khi sinh đồ thị.
+  if (floor.walls.length && floor.navGraph.edges.length) {
+    const walls = solidWallObstacles(floor);
+    for (const e of floor.navGraph.edges) {
+      const a = nodes.get(e.from)?.position;
+      const b = nodes.get(e.to)?.position;
+      if (a && b && crossesWall(walls, a, b, 0.05)) {
+        push(
+          'warning',
+          'NAV_EDGE_THROUGH_WALL',
+          'Cạnh đồ thị đi lại xuyên qua tường (không qua cửa) — chỉ đường có thể dẫn người đi xuyên tường',
+          e.id,
+        );
+      }
     }
   }
 

@@ -65,8 +65,14 @@ import { editorCommands, useEditorShortcuts } from '../editor/useShortcuts';
 import { selectionCount } from '../editor/workspace';
 import { api, errorMessage } from '../lib/api';
 import { createBuilding } from '../lib/buildingActions';
-import { useActiveBuilding, useActiveBuildingId, useBuildings, useCampus } from '../lib/queries';
-import { useCampusDraft, type MapLayer } from '../site/campusDraft';
+import {
+  useActiveBuilding,
+  useActiveBuildingId,
+  useBuildings,
+  useCampus,
+  useCampuses,
+} from '../lib/queries';
+import { isCampusDirty, useCampusDraft, type MapLayer } from '../site/campusDraft';
 import { clearSite } from '../site/siteOps';
 import {
   SiteBackground,
@@ -231,6 +237,28 @@ export function MapEditorPage({ mode }: { mode: MapLayer }) {
   const storedDraft = useCampusDraft((s) => s.draft);
   const campus = storedDraft && storedDraft.id === campusId ? storedDraft : null;
   const layer = mode;
+  const campusList = useCampuses();
+  /** Trang Khuôn viên: đổi sang cơ sở khác = mở toà đầu tiên của cơ sở đó. */
+  const switchCampus = (id: Id) => {
+    const first = summaries.data?.find((b) => b.campusId === id)?.id;
+    if (!first || id === campusId) return;
+    if (
+      isCampusDirty(useCampusDraft.getState()) &&
+      !window.confirm('Ngoài trời của cơ sở đang mở có thay đổi chưa lưu sẽ bị bỏ. Vẫn đổi cơ sở?')
+    )
+      return;
+    useCampusDraft.getState().reset();
+    // Ở lại trang Khuôn viên (không qua openBuilding — hàm đó chuyển sang /map), mở ở mặt đất.
+    const target = useEditor.getState().drafts[first];
+    if (target) useEditor.getState().activate(first, { floorId: groundFloor(target)?.id });
+    else pendingGround.current = true;
+    useActiveBuildingId.getState().setBuildingId(first);
+  };
+  /**
+   * Mở tầng mặt đất khi toà tải xong: lúc vào trang Khuôn viên (phần ngoài trời chỉ hiện rõ ở mặt
+   * đất) và khi đổi cơ sở bằng ô chọn mà toà đó chưa tải.
+   */
+  const pendingGround = useRef(mode === 'site');
   /** Từ trang Khuôn viên sang trang Vẽ toà nhà (vd. để vẽ trong một toà). */
   const goBuilding = (search = '') => {
     if (mode === 'site') void navigate(`/map${search}`);
@@ -322,6 +350,11 @@ export function MapEditorPage({ mode }: { mode: MapLayer }) {
   };
   useEffect(() => {
     if (!building) return;
+    if (pendingGround.current) {
+      pendingGround.current = false;
+      const g = groundFloor(building);
+      if (g) setFloor(g.id);
+    }
     const want = pendingLevel.current;
     if (want === null || !campus) return;
     const pl = campus.buildings.find((x) => x.buildingId === building.id);
@@ -544,7 +577,7 @@ export function MapEditorPage({ mode }: { mode: MapLayer }) {
           placement,
           underlay: (
             <Group>
-              <SiteBackground campus={campus} />
+              <SiteBackground campus={campus} ink={theme.planInk} />
               <Grid unit={gridUnit} minor={1} theme={theme} />
               {(campus.site || site.owner.size > 0) && (
                 <SiteGround
@@ -571,7 +604,9 @@ export function MapEditorPage({ mode }: { mode: MapLayer }) {
               />
             </Group>
           ),
-          fitKey: `${campus.id}:${building?.id}`,
+          // Trang Khuôn viên mở ra thấy cả cơ sở (căn lại khi đường bao các toà tải xong).
+          bounds: campusBounds ?? undefined,
+          fitKey: `${campus.id}:${building?.id}:${campusBounds ? 'all' : ''}`,
           overlay: layer === 'site' ? <SiteEditorOverlay ed={site} theme={theme} /> : null,
           site:
             layer === 'site'
@@ -814,7 +849,22 @@ export function MapEditorPage({ mode }: { mode: MapLayer }) {
         <div className="editor-context" hidden={mode !== 'site'}>
           {mode === 'site' ? (
             <>
-              <strong>{campus?.name}</strong>
+              {(campusList.data?.length ?? 0) > 1 ? (
+                <select
+                  className="campus-select"
+                  aria-label="Cơ sở đang xem"
+                  value={campusId ?? ''}
+                  onChange={(e) => switchCampus(e.target.value)}
+                >
+                  {campusList.data!.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <strong>{campus?.name}</strong>
+              )}
               {siteIssueCount > 0 && (
                 <span className="muted small"> · {siteIssueCount} cảnh báo</span>
               )}

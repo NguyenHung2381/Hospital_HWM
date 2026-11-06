@@ -1,17 +1,18 @@
-/* Trang Lưu lượng. Màu biểu đồ lấy từ bảng màu tham chiếu (series 1, lưới, trục) — có bước riêng cho theme tối. */
+/* Trang Lưu lượng. Màu biểu đồ lấy từ @hwn/theme (series, lưới, trục) — có bước riêng cho theme tối. */
 
 :root {
-  --chart-series: #2a78d6;
-  --chart-grid: #e1e0d9;
-  --chart-axis: #c3c2b7;
-  --chart-muted: #898781;
+  --chart-series: var(--tone-blue-solid);
+  --chart-grid: var(--color-gray-200);
+  --chart-axis: var(--color-gray-300);
+  --chart-muted: var(--color-gray-500);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --chart-series: #3987e5;
-    --chart-grid: #2c2c2a;
-    --chart-axis: #383835;
+    --chart-series: var(--color-secondary);
+    --chart-grid: var(--color-gray-700);
+    --chart-axis: var(--color-gray-600);
+    --chart-muted: var(--color-gray-400);
   }
 }
 
@@ -44,22 +45,22 @@
 }
 
 .live-live .live-dot {
-  background: #0ca30c;
-  box-shadow: 0 0 0 0 rgb(12 163 12 / 0.5);
+  background: var(--color-success);
+  box-shadow: 0 0 0 0 rgb(10 155 74 / 0.5);
   animation: live-pulse 1.8s ease-out infinite;
 }
 
 .live-polling .live-dot {
-  background: #fab219;
+  background: var(--color-warning);
 }
 
 .live-offline .live-dot {
-  background: #d03b3b;
+  background: var(--color-error);
 }
 
 @keyframes live-pulse {
   to {
-    box-shadow: 0 0 0 8px rgb(12 163 12 / 0);
+    box-shadow: 0 0 0 8px rgb(10 155 74 / 0);
   }
 }
 
@@ -111,7 +112,7 @@
   gap: 10px;
   padding: 10px 14px;
   border-radius: var(--radius);
-  border: 1px solid #d03b3b;
+  border: 1px solid var(--color-error);
   background: var(--color-surface);
 }
 
@@ -203,7 +204,7 @@
 
 .seg button.active {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-white);
 }
 
 .seg-count {
@@ -275,8 +276,8 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #d03b3b;
-  color: #fff;
+  background: var(--color-error);
+  color: var(--color-white);
   font-weight: 700;
   font-size: 0.75rem;
 }
@@ -350,7 +351,7 @@
   padding: 0;
   border: none;
   background: none;
-  color: var(--color-primary);
+  color: var(--color-link);
   font: inherit;
   cursor: pointer;
   text-align: left;

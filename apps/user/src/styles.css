@@ -1,13 +1,5 @@
 :root {
-  --color-primary: #0f766e;
-  --color-primary-contrast: #ffffff;
-  --color-bg: #f1f5f9;
-  --color-surface: #ffffff;
-  --color-text: #0f172a;
-  --color-muted: #64748b;
-  --color-border: #e2e8f0;
-  --color-error: #dc2626;
-  --color-warning: #b45309;
+  /* Màu lấy từ @hwn/theme/tokens.css (import trong main.tsx). */
   --radius: 12px;
   font-family:
     system-ui,
@@ -18,20 +10,6 @@
   color: var(--color-text);
   background: var(--color-bg);
   -webkit-tap-highlight-color: transparent;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-primary: #14b8a6;
-    --color-primary-contrast: #042f2e;
-    --color-bg: #0b1120;
-    --color-surface: #111827;
-    --color-text: #e2e8f0;
-    --color-muted: #94a3b8;
-    --color-border: #1f2937;
-    --color-error: #f87171;
-    --color-warning: #fbbf24;
-  }
 }
 
 * {
@@ -73,7 +51,7 @@ h2 {
 }
 
 .back-link {
-  color: var(--color-primary);
+  color: var(--color-link);
   text-decoration: none;
   font-weight: 500;
 }

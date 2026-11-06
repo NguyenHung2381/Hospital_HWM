@@ -20,10 +20,8 @@ import {
   campusLevels,
   campusRouteToSiteRoute,
   CampusRouteError,
-  findCampusRoute,
   floorAtLevel,
   createId,
-  findRoute,
   nextPlacementPosition,
   RouteError,
   searchRooms,
@@ -40,6 +38,7 @@ import {
   type Floor,
   type LocalizeResult,
 } from '@hwn/map-core';
+import { buildingRouter, campusRouter } from './routers';
 import { db } from './db';
 import { TrafficSimulator } from './traffic';
 
@@ -378,10 +377,10 @@ export function createHandlers(baseURL = '/api'): Array<HttpHandler | WebSocketH
         }),
       );
       try {
-        const route = findCampusRoute(campus, buildings, body.from, body.to, {
+        const route = campusRouter(campus, buildings, {
           accessibleOnly: body.accessibleOnly,
           preferCovered: body.preferCovered,
-        });
+        }).route(body.from, body.to);
         return route
           ? HttpResponse.json({
               route,
@@ -547,9 +546,9 @@ export function createHandlers(baseURL = '/api'): Array<HttpHandler | WebSocketH
       const building = db.getBuilding(body.buildingId);
       if (!building) return notFound('toà nhà');
       try {
-        const route = findRoute(building, body.from, body.to, {
+        const route = buildingRouter(building, {
           accessibleOnly: body.accessibleOnly,
-        });
+        }).route(body.from, body.to);
         return route
           ? HttpResponse.json(route)
           : apiError(422, 'NO_ROUTE', 'Không tìm được đường đi tới điểm đến');

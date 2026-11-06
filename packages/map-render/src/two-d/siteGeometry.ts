@@ -367,3 +367,40 @@ export function entranceLinks(
     ];
   });
 }
+
+/** Hai đỉnh cách nhau không quá ngưỡng này (m) được coi là cùng một chỗ nối đường. */
+const ELBOW_TOLERANCE = 0.35;
+
+/** Họ đường để xét chỗ nối: đường xe nối đường xe, lối đi bộ nối lối đi bộ. */
+const pathFamily = (p: Pick<SitePath, 'kind'>): 'road' | 'walk' | null =>
+  p.kind === 'vehicle' || p.kind === 'shared'
+    ? 'road'
+    : p.kind === 'pedestrian' || p.kind === 'covered'
+      ? 'walk'
+      : null;
+
+/**
+ * Đầu đường trùng với một đỉnh (đầu mút hoặc góc gãy) của đường khác cùng họ — chỗ hai đường nối
+ * thành khuỷu / ngã ba. Đầu cắt vuông ở đó để lộ khấc ở góc ngoài, nên được bo tròn (như nét
+ * `lineJoin: round` của một đường liền) để mặt đường liền một khối.
+ */
+export function pathElbows(
+  paths: readonly SitePath[],
+): Map<SitePath['id'], { start: boolean; end: boolean }> {
+  const out = new Map<SitePath['id'], { start: boolean; end: boolean }>();
+  for (const p of paths) {
+    const family = pathFamily(p);
+    if (!family || p.points.length < 2) continue;
+    const touches = (at: Point) =>
+      paths.some(
+        (q) =>
+          q !== p &&
+          pathFamily(q) === family &&
+          q.points.some((v) => distance(v, at) <= ELBOW_TOLERANCE),
+      );
+    const start = touches(p.points[0]!);
+    const end = touches(p.points[p.points.length - 1]!);
+    if (start || end) out.set(p.id, { start, end });
+  }
+  return out;
+}

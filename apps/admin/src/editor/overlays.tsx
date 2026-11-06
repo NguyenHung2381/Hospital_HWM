@@ -1,5 +1,5 @@
 /** Các lớp vẽ riêng của editor (Konva, toạ độ mét). Dùng bên trong <MapStage>. */
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Circle, Group, Image as KonvaImage, Line, Path, Rect, Shape, Text } from 'react-konva';
 import {
   distance,
@@ -11,6 +11,7 @@ import {
   type OpeningType,
   type Point,
 } from '@hwn/map-core';
+import { useInkImage } from './background';
 import {
   DoorMark,
   flattenPoints,
@@ -25,11 +26,12 @@ import {
 import { annotationPoints, furnitureCorners, type OpeningPlacement } from './ops';
 import type { SnapKind } from './snap';
 import type { ItemRef } from './types';
+import { palette } from '@hwn/theme';
 
-export const ACCENT = '#f97316';
-const OK = '#16a34a';
-const BAD = '#dc2626';
-const MEASURE = '#2563eb';
+export const ACCENT = palette.accent;
+const OK = palette.success;
+const BAD = palette.error;
+const MEASURE = palette.blueSolid;
 
 /* ------------------------------------------------------------------ */
 
@@ -91,24 +93,9 @@ export function Grid({
 
 /* ------------------------------------------------------------------ */
 
-function useImage(url: string | undefined) {
-  const [image, setImage] = useState<HTMLImageElement | null>(null);
-  useEffect(() => {
-    if (!url) return;
-    const img = new window.Image();
-    img.onload = () => setImage(img);
-    img.src = url;
-    return () => {
-      img.onload = null;
-      setImage(null);
-    };
-  }, [url]);
-  return url ? image : null;
-}
-
-/** Ảnh mặt bằng làm nền để vẽ đè. */
-export function BackgroundImage({ background }: { background: FloorBackground }) {
-  const image = useImage(background.url);
+/** Ảnh mặt bằng làm nền để vẽ đè — giấy trong suốt, nét theo màu `ink` (vd. `theme.planInk`). */
+export function BackgroundImage({ background, ink }: { background: FloorBackground; ink: string }) {
+  const image = useInkImage(background.url, ink);
   if (!image) return null;
   return (
     <KonvaImage
@@ -332,7 +319,7 @@ export function SelectionOverlay({
   );
 }
 
-const DESTINATION = '#dc2626';
+const DESTINATION = palette.error;
 
 /**
  * Điểm đích đến của các phòng: chấm nhỏ cho mọi phòng có đặt điểm đích, tay nắm kéo được (kèm
@@ -470,7 +457,7 @@ export function AreaGhost({ polygon, existing }: { polygon: Point[]; existing: b
       points={flattenPoints(polygon)}
       closed
       fill={existing ? 'rgba(100, 116, 139, 0.12)' : withAlpha(OK, 0.18)}
-      stroke={existing ? '#64748b' : OK}
+      stroke={existing ? palette.gray500 : OK}
       strokeWidth={2}
       strokeScaleEnabled={false}
       listening={false}
@@ -578,11 +565,11 @@ export function WallPreview({
 }
 
 const SNAP_COLORS: Record<SnapKind, string> = {
-  endpoint: '#f97316',
-  wall: '#0ea5e9',
-  angle: '#a855f7',
-  grid: '#64748b',
-  free: '#64748b',
+  endpoint: palette.accent,
+  wall: palette.secondaryDark,
+  angle: palette.purpleSolid,
+  grid: palette.gray500,
+  free: palette.gray500,
 };
 
 export function SnapMarker({ point, kind }: { point: Point; kind: SnapKind }) {

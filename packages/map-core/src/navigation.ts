@@ -5,12 +5,14 @@ import {
   pointsEqual,
   polylineLength,
   projectPointOnSegment,
-  segmentIntersection,
   signedAngleBetween,
   sub,
   toDegrees,
+  type SegmentProjection,
 } from './geometry';
-import { findFloor, findLandmark, findRoom, roomDestination } from './lookup';
+import { dijkstra, pathTo, type PathStep, type WeightedArc } from './graph';
+import { findLandmark, findRoom, roomDestination } from './lookup';
+import { crossesWall, solidWallObstacles, type WallObstacle } from './obstacles';
 import type {
   Building,
   Connector,
@@ -46,11 +48,13 @@ export function connectorTravelSeconds(type: ConnectorType, dz: number): number 
       return h * 6;
     case 'escalator':
       return h * 5;
+    case 'ramp':
+      return h * 10; // dốc ~1:12, đi bộ ~1,2 m/s
   }
 }
 
 export interface RouteOptions {
-  /** Chỉ dùng lối đi phù hợp xe lăn: bỏ thang bộ, thang cuốn và các cạnh `accessible: false`. */
+  /** Chỉ dùng lối đi phù hợp xe lăn: bỏ thang bộ, thang cuốn và các cạnh `accessible: false` (giữ thang máy, dốc). */
   accessibleOnly?: boolean;
 }
 
@@ -82,22 +86,34 @@ interface GraphNode {
   node?: NavNode;
 }
 
-interface Arc {
+interface Arc extends WeightedArc {
   to: Key;
   /** Chi phí quy đổi ra "mét đi bộ" để so sánh được với quãng đường. */
   cost: number;
   connector?: Connector;
 }
 
-interface Graph {
-  nodes: Map<Key, GraphNode>;
-  adj: Map<Key, Arc[]>;
+/** Một cạnh trong tầng (đã qua bộ lọc `accessibleOnly`) — để gắn vị trí tự do vào giữa cạnh. */
+interface GraphEdge {
+  a: Key;
+  b: Key;
+  /** Chi phí trên mỗi mét dọc cạnh (≠ 1 khi cạnh có `weight` riêng). */
+  perMeter: number;
 }
 
-function addArc(g: Graph, from: Key, arc: Arc) {
-  const list = g.adj.get(from);
+export interface BuildingGraph {
+  nodes: Map<Key, GraphNode>;
+  adj: Map<Key, Arc[]>;
+  /** Các cạnh trong tầng, theo tầng. */
+  edges: Map<Id, GraphEdge[]>;
+  /** Các nút, theo tầng. */
+  floorNodes: Map<Id, GraphNode[]>;
+}
+
+function addArc(adj: Map<Key, Arc[]>, from: Key, arc: Arc) {
+  const list = adj.get(from);
   if (list) list.push(arc);
-  else g.adj.set(from, [arc]);
+  else adj.set(from, [arc]);
 }
 
 /** Chi phí cộng thêm (m) cho cạnh đi xuyên qua nội thất. */
@@ -108,27 +124,40 @@ function canTravel(connector: Connector, fromElevation: number, toElevation: num
   return connector.direction === 'up' ? toElevation > fromElevation : toElevation < fromElevation;
 }
 
-export function buildBuildingGraph(building: Building, options: RouteOptions = {}): Graph {
-  const g: Graph = { nodes: new Map(), adj: new Map() };
+export function buildBuildingGraph(building: Building, options: RouteOptions = {}): BuildingGraph {
+  const g: BuildingGraph = {
+    nodes: new Map(),
+    adj: new Map(),
+    edges: new Map(),
+    floorNodes: new Map(),
+  };
 
   for (const floor of building.floors) {
+    const floorNodes: GraphNode[] = [];
     for (const node of floor.navGraph.nodes) {
       const key = keyOf(floor.id, node.id);
-      g.nodes.set(key, { key, floorId: floor.id, position: node.position, node });
+      const gn: GraphNode = { key, floorId: floor.id, position: node.position, node };
+      g.nodes.set(key, gn);
+      floorNodes.push(gn);
     }
+    g.floorNodes.set(floor.id, floorNodes);
+    const floorEdges: GraphEdge[] = [];
     for (const edge of floor.navGraph.edges) {
       if (options.accessibleOnly && edge.accessible === false) continue;
       const a = g.nodes.get(keyOf(floor.id, edge.from));
       const b = g.nodes.get(keyOf(floor.id, edge.to));
       if (!a || !b) continue;
+      const len = distance(a.position, b.position);
+      const weight = edge.weight ?? len;
       // Cạnh xuyên qua nội thất (đồ thị vẽ tay / chưa sinh lại sau khi kê đồ): vẫn đi được nếu
       // không còn lối nào khác, nhưng tuyến sẽ ưu tiên đường vòng.
       const blocked = furnitureAcross(floor.furniture, a.position, b.position);
-      const cost =
-        (edge.weight ?? distance(a.position, b.position)) + (blocked ? FURNITURE_PENALTY : 0);
-      addArc(g, a.key, { to: b.key, cost });
-      addArc(g, b.key, { to: a.key, cost });
+      const cost = weight + (blocked ? FURNITURE_PENALTY : 0);
+      addArc(g.adj, a.key, { to: b.key, cost });
+      addArc(g.adj, b.key, { to: a.key, cost });
+      floorEdges.push({ a: a.key, b: b.key, perMeter: len > 1e-9 ? weight / len : 1 });
     }
+    g.edges.set(floor.id, floorEdges);
   }
 
   // Nối các nút thang có cùng linkId giữa các tầng.
@@ -139,7 +168,8 @@ export function buildBuildingGraph(building: Building, options: RouteOptions = {
       if (node.kind !== 'connector' || !node.refId) continue;
       const connector = connectors.get(node.refId);
       if (!connector) continue;
-      if (options.accessibleOnly && connector.type !== 'elevator') continue;
+      if (options.accessibleOnly && connector.type !== 'elevator' && connector.type !== 'ramp')
+        continue;
       const list = byLink.get(connector.linkId) ?? [];
       list.push({ floor, connector, key: keyOf(floor.id, node.id) });
       byLink.set(connector.linkId, list);
@@ -154,7 +184,7 @@ export function buildBuildingGraph(building: Building, options: RouteOptions = {
           a.connector.type,
           b.floor.elevation - a.floor.elevation,
         );
-        addArc(g, a.key, { to: b.key, cost: seconds * WALK_SPEED, connector: a.connector });
+        addArc(g.adj, a.key, { to: b.key, cost: seconds * WALK_SPEED, connector: a.connector });
       }
     }
   }
@@ -163,142 +193,104 @@ export function buildBuildingGraph(building: Building, options: RouteOptions = {
 }
 
 /* ------------------------------------------------------------------ */
-/* Gắn vị trí tự do vào đồ thị                                          */
+/* Một lần tìm đường: các nút tạm đặt chồng lên đồ thị gốc              */
 /* ------------------------------------------------------------------ */
 
 /**
- * Chiếu `location` lên cạnh gần nhất của tầng và thêm một nút tạm vào đồ thị.
- * Trả về khoá nút tạm.
+ * Nút tạm (vị trí người dùng, điểm đến tự do…) và cung nối của MỘT lần tìm đường. Đồ thị gốc
+ * không bị sửa nên dùng lại được cho nhiều lần tìm.
  */
-function attachLocation(g: Graph, floor: Floor, location: Location, tag: string): Key {
-  const key = `${floor.id}:__${tag}`;
-  g.nodes.set(key, { key, floorId: floor.id, position: location.position });
+class RouteQuery {
+  private nodes = new Map<Key, GraphNode>();
+  private adj = new Map<Key, Arc[]>();
+  /** Các nút tạm đã chèn vào giữa từng cạnh — nối thẳng với nhau khi cùng cạnh. */
+  private onEdge = new Map<GraphEdge, Key[]>();
+  private seq = 0;
 
-  let best: { a: Key; b: Key; point: Point; distance: number } | null = null;
-  for (const edge of floor.navGraph.edges) {
-    const a = g.nodes.get(keyOf(floor.id, edge.from));
-    const b = g.nodes.get(keyOf(floor.id, edge.to));
-    if (!a || !b || !g.adj.get(a.key)?.some((arc) => arc.to === b.key)) continue;
-    const proj = projectPointOnSegment(location.position, a.position, b.position);
-    if (!best || proj.distance < best.distance) {
-      best = { a: a.key, b: b.key, point: proj.point, distance: proj.distance };
-    }
+  constructor(
+    private readonly g: BuildingGraph,
+    private readonly wallsOf: (floor: Floor) => readonly WallObstacle[],
+  ) {}
+
+  node(key: Key): GraphNode | undefined {
+    return this.nodes.get(key) ?? this.g.nodes.get(key);
   }
 
-  if (best) {
-    // Nút tạm trên cạnh, rồi nối vị trí thật vào nút đó.
-    const onEdgeKey = `${key}_proj`;
-    g.nodes.set(onEdgeKey, { key: onEdgeKey, floorId: floor.id, position: best.point });
-    const link = (u: Key, v: Key) => {
-      const pu = g.nodes.get(u)!.position;
-      const pv = g.nodes.get(v)!.position;
-      // Đoạn tạm cũng bị phạt nếu xuyên qua nội thất (nếu không tuyến sẽ "lách" qua cạnh bị phạt).
-      const cost =
-        distance(pu, pv) + (furnitureAcross(floor.furniture, pu, pv) ? FURNITURE_PENALTY : 0);
-      addArc(g, u, { to: v, cost });
-      addArc(g, v, { to: u, cost });
-    };
-    link(key, onEdgeKey);
-    link(onEdgeKey, best.a);
-    link(onEdgeKey, best.b);
+  readonly neighbors = (key: Key): readonly Arc[] => {
+    const base = this.g.adj.get(key);
+    const extra = this.adj.get(key);
+    if (!extra) return base ?? [];
+    return base ? base.concat(extra) : extra;
+  };
+
+  private link(u: Key, v: Key, cost: number) {
+    addArc(this.adj, u, { to: v, cost });
+    addArc(this.adj, v, { to: u, cost });
+  }
+
+  /** Nối hai điểm trong tầng bằng đoạn thẳng (bị phạt nếu xuyên qua nội thất). */
+  private walk(floor: Floor, u: Key, v: Key, perMeter = 1) {
+    const pu = this.node(u)!.position;
+    const pv = this.node(v)!.position;
+    const blocked = furnitureAcross(floor.furniture, pu, pv);
+    this.link(u, v, distance(pu, pv) * perMeter + (blocked ? FURNITURE_PENALTY : 0));
+  }
+
+  /** Nút tại hình chiếu `proj` trên cạnh `edge` (dùng luôn đầu cạnh nếu hình chiếu trùng đầu cạnh). */
+  private split(floor: Floor, edge: GraphEdge, proj: SegmentProjection): Key {
+    const a = this.node(edge.a)!;
+    const b = this.node(edge.b)!;
+    if (pointsEqual(proj.point, a.position)) return a.key;
+    if (pointsEqual(proj.point, b.position)) return b.key;
+    const key = `${floor.id}:__p${this.seq++}`;
+    this.nodes.set(key, { key, floorId: floor.id, position: proj.point });
+    this.walk(floor, key, a.key, edge.perMeter);
+    this.walk(floor, key, b.key, edge.perMeter);
+    // Hai vị trí cùng chiếu lên một cạnh (vd. điểm đầu và điểm cuối cùng một đoạn hành lang): đi
+    // thẳng giữa chúng, không phải vòng ra đầu cạnh rồi quay lại.
+    const others = this.onEdge.get(edge) ?? [];
+    for (const other of others) this.walk(floor, key, other, edge.perMeter);
+    this.onEdge.set(edge, [...others, key]);
     return key;
   }
 
-  // Tầng không có cạnh nào: nối tới nút gần nhất.
-  let nearest: GraphNode | null = null;
-  for (const n of g.nodes.values()) {
-    if (n.floorId !== floor.id || n.key === key) continue;
-    if (
-      !nearest ||
-      distance(n.position, location.position) < distance(nearest.position, location.position)
-    ) {
-      nearest = n;
-    }
-  }
-  if (!nearest) throw new RouteError('EMPTY_GRAPH', `Tầng "${floor.name}" chưa có đồ thị đi lại`);
-  const cost = distance(nearest.position, location.position);
-  addArc(g, key, { to: nearest.key, cost });
-  addArc(g, nearest.key, { to: key, cost });
-  return key;
-}
+  /**
+   * Thêm nút tạm tại `position` và nối vào cạnh gần nhất của tầng mà đoạn nối KHÔNG xuyên tường
+   * (người đứng trong phòng đi ra qua cửa, không xuyên sang hành lang sau tường). Chỉ khi không có
+   * cạnh nào nhìn thấy được mới dùng cạnh gần nhất.
+   */
+  attach(floor: Floor, position: Point, tag: string): Key {
+    const key = `${floor.id}:__${tag}`;
+    this.nodes.set(key, { key, floorId: floor.id, position });
+    const walls = this.wallsOf(floor);
+    const visible = (p: Point) => !crossesWall(walls, position, p);
 
-/* ------------------------------------------------------------------ */
-/* Dijkstra                                                            */
-/* ------------------------------------------------------------------ */
-
-class MinHeap<T> {
-  private items: { priority: number; value: T }[] = [];
-  get size() {
-    return this.items.length;
-  }
-  push(value: T, priority: number) {
-    const items = this.items;
-    items.push({ priority, value });
-    let i = items.length - 1;
-    while (i > 0) {
-      const parent = (i - 1) >> 1;
-      if (items[parent]!.priority <= items[i]!.priority) break;
-      [items[parent], items[i]] = [items[i]!, items[parent]!];
-      i = parent;
+    const edges = this.g.edges.get(floor.id) ?? [];
+    if (edges.length) {
+      const candidates = edges
+        .map((edge) => ({
+          edge,
+          proj: projectPointOnSegment(
+            position,
+            this.node(edge.a)!.position,
+            this.node(edge.b)!.position,
+          ),
+        }))
+        .sort((p, q) => p.proj.distance - q.proj.distance);
+      const best = candidates.find((c) => visible(c.proj.point)) ?? candidates[0]!;
+      this.walk(floor, key, this.split(floor, best.edge, best.proj));
+      return key;
     }
-  }
-  pop(): { priority: number; value: T } | undefined {
-    const items = this.items;
-    const top = items[0];
-    const last = items.pop();
-    if (items.length > 0 && last) {
-      items[0] = last;
-      let i = 0;
-      for (;;) {
-        const l = 2 * i + 1;
-        const r = l + 1;
-        let m = i;
-        if (l < items.length && items[l]!.priority < items[m]!.priority) m = l;
-        if (r < items.length && items[r]!.priority < items[m]!.priority) m = r;
-        if (m === i) break;
-        [items[m], items[i]] = [items[i]!, items[m]!];
-        i = m;
-      }
-    }
-    return top;
-  }
-}
 
-interface PathStep {
-  key: Key;
-  /** Cung dùng để đi tới nút này (undefined với nút đầu). */
-  via?: Arc;
-}
-
-function dijkstra(g: Graph, start: Key, goals: ReadonlySet<Key>): PathStep[] | null {
-  const dist = new Map<Key, number>([[start, 0]]);
-  const prev = new Map<Key, { from: Key; arc: Arc }>();
-  const heap = new MinHeap<Key>();
-  heap.push(start, 0);
-
-  while (heap.size) {
-    const { priority, value: u } = heap.pop()!;
-    if (priority > (dist.get(u) ?? Infinity)) continue;
-    if (goals.has(u)) {
-      const path: PathStep[] = [];
-      let cur: Key | undefined = u;
-      while (cur !== undefined) {
-        const p = prev.get(cur);
-        path.push({ key: cur, via: p?.arc });
-        cur = p?.from;
-      }
-      return path.reverse();
-    }
-    for (const arc of g.adj.get(u) ?? []) {
-      const nd = priority + arc.cost;
-      if (nd < (dist.get(arc.to) ?? Infinity)) {
-        dist.set(arc.to, nd);
-        prev.set(arc.to, { from: u, arc });
-        heap.push(arc.to, nd);
-      }
-    }
+    // Tầng không có cạnh nào: nối tới nút gần nhất (ưu tiên nút nhìn thấy được).
+    const nodes = [...(this.g.floorNodes.get(floor.id) ?? [])].sort(
+      (p, q) => distance(p.position, position) - distance(q.position, position),
+    );
+    const nearest = nodes.find((n) => visible(n.position)) ?? nodes[0];
+    if (!nearest) throw new RouteError('EMPTY_GRAPH', `Tầng "${floor.name}" chưa có đồ thị đi lại`);
+    this.walk(floor, key, nearest.key);
+    return key;
   }
-  return null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -323,6 +315,7 @@ const CONNECTOR_VERB: Record<ConnectorType, { type: RouteInstruction['type']; la
   elevator: { type: 'take-elevator', label: 'Đi thang máy' },
   stairs: { type: 'take-stairs', label: 'Đi thang bộ' },
   escalator: { type: 'take-escalator', label: 'Đi thang cuốn' },
+  ramp: { type: 'take-ramp', label: 'Đi theo dốc' },
 };
 
 const fmtMeters = (m: number) => `${Math.max(1, Math.round(m))} m`;
@@ -417,24 +410,56 @@ function withEntryStep(
   return out;
 }
 
-/**
- * Tìm đường ngắn nhất (theo thời gian) từ `from` tới một phòng hoặc một vị trí.
- * Trả về null nếu không có đường đi.
- */
-export function findRoute(
-  building: Building,
-  from: Location,
-  target: RouteTarget,
-  options: RouteOptions = {},
-): Route | null {
-  const fromFloor = findFloor(building, from.floorId);
-  if (!fromFloor) throw new RouteError('UNKNOWN_FLOOR', `Không tìm thấy tầng "${from.floorId}"`);
+/* ------------------------------------------------------------------ */
+/* Tìm đường                                                           */
+/* ------------------------------------------------------------------ */
 
+/** Điểm đến đã được gắn vào đồ thị của một lần tìm. */
+interface Goal {
+  keys: ReadonlySet<Key>;
+  to: Route['to'];
+  destinationName: string;
+  /** Điểm cuối cùng nối thêm sau nút đích (điểm đích trong phòng, mốc trong phòng). */
+  finalPoint?: Point;
+  /** Phòng mà tuyến đi vào ở cuối — để đánh dấu cửa vào. */
+  entryRoom?: Room;
+}
+
+/**
+ * Bộ tìm đường của một toà: dựng đồ thị một lần, dùng lại cho nhiều lần tìm. Đồ thị được chụp
+ * tại lúc tạo — toà nhà sửa sau đó (kể cả sửa trực tiếp object) cần tạo bộ tìm đường mới.
+ */
+export interface BuildingRouter {
+  readonly building: Building;
+  readonly options: RouteOptions;
+  /** Tuyến ngắn nhất (theo thời gian) từ `from` tới `target`, null nếu không có đường. */
+  route(from: Location, target: RouteTarget): Route | null;
+  /** Như `route` cho nhiều điểm đến cùng lúc (một lần Dijkstra). */
+  routes(from: Location, targets: readonly RouteTarget[]): (Route | null)[];
+  /** Ném `RouteError` nếu không thể chỉ đường tới `target` (phòng không tồn tại / chưa có trong đồ thị…). */
+  assertTarget(target: RouteTarget): void;
+}
+
+export function createBuildingRouter(
+  building: Building,
+  options: RouteOptions = {},
+): BuildingRouter {
   const g = buildBuildingGraph(building, options);
-  const startKey = attachLocation(g, fromFloor, from, 'start');
+  const floors = new Map(building.floors.map((f) => [f.id, f]));
+  const walls = new Map<Id, WallObstacle[]>();
+  const wallsOf = (floor: Floor) => {
+    let list = walls.get(floor.id);
+    if (!list) walls.set(floor.id, (list = solidWallObstacles(floor)));
+    return list;
+  };
+  const floorOf = (id: Id) => {
+    const floor = floors.get(id);
+    if (!floor) throw new RouteError('UNKNOWN_FLOOR', `Không tìm thấy tầng "${id}"`);
+    return floor;
+  };
 
   /** Các nút đồ thị đại diện cho phòng (đi vào phòng qua cửa). */
-  const roomGoals = (floor: Floor, room: { id: Id; name: string }) => {
+  const roomGoals = (floor: Floor, room: Room): Set<Key> => {
     const nodes = floor.navGraph.nodes.filter((n) => n.kind === 'room' && n.refId === room.id);
     if (!nodes.length) {
       throw new RouteError('ROOM_NOT_IN_GRAPH', `Phòng "${room.name}" chưa có trong đồ thị đi lại`);
@@ -442,164 +467,207 @@ export function findRoute(
     return new Set(nodes.map((n) => keyOf(floor.id, n.id)));
   };
 
-  let goals: Set<Key>;
-  let to: Route['to'];
-  let destinationName: string;
-  /** Điểm cuối cùng nối thêm sau nút đích (điểm đích trong phòng, mốc trong phòng). */
-  let finalPoint: Point | undefined;
-  /** Phòng mà tuyến đi vào ở cuối — để đánh dấu cửa vào. */
-  let entryRoom: Room | undefined;
-  if ('roomId' in target) {
-    const ref = findRoom(building, target.roomId);
-    if (!ref) throw new RouteError('UNKNOWN_ROOM', `Không tìm thấy phòng "${target.roomId}"`);
-    goals = roomGoals(ref.floor, ref.room);
-    finalPoint = roomDestination(ref.room);
-    entryRoom = ref.room;
-    to = { floorId: ref.floor.id, position: finalPoint ?? { x: 0, y: 0 }, roomId: ref.room.id };
-    destinationName = ref.room.code ? `${ref.room.name} (${ref.room.code})` : ref.room.name;
-  } else if ('landmarkId' in target) {
-    const ref = findLandmark(building, target.landmarkId);
-    if (!ref) {
-      throw new RouteError('UNKNOWN_LANDMARK', `Không tìm thấy mốc "${target.landmarkId}"`);
-    }
-    const { floor, landmark } = ref;
-    // Mốc nằm trong một phòng: đi vào phòng qua cửa rồi tới mốc (không xuyên tường).
-    const room = floor.rooms.find((r) => pointInPolygon(landmark.position, r.polygon));
-    goals = room
-      ? roomGoals(floor, room)
-      : new Set([
-          attachLocation(g, floor, { floorId: floor.id, position: landmark.position }, 'goal'),
-        ]);
-    finalPoint = landmark.position;
-    entryRoom = room;
-    to = { floorId: floor.id, position: landmark.position, landmarkId: landmark.id };
-    destinationName = landmark.name;
-  } else {
-    const toFloor = findFloor(building, target.floorId);
-    if (!toFloor) throw new RouteError('UNKNOWN_FLOOR', `Không tìm thấy tầng "${target.floorId}"`);
-    goals = new Set([attachLocation(g, toFloor, target, 'goal')]);
-    to = { floorId: toFloor.id, position: target.position };
-    destinationName = 'điểm đến';
-  }
-
-  const steps = dijkstra(g, startKey, goals);
-  if (!steps) return null;
-  const goalPosition = g.nodes.get(steps[steps.length - 1]!.key)!.position;
-  to = { ...to, position: finalPoint ?? goalPosition };
-
-  // Chia đường đi theo tầng.
-  const segments: RouteSegment[] = [];
-  let current: RouteSegment | null = null;
-  let transitionSeconds = 0;
-  for (let i = 0; i < steps.length; i++) {
-    const step = steps[i]!;
-    const node = g.nodes.get(step.key)!;
-    const prevNode = i > 0 ? g.nodes.get(steps[i - 1]!.key) : undefined;
-    if (current && step.via?.connector && prevNode && prevNode.floorId !== node.floorId) {
-      const prevFloor = findFloor(building, prevNode.floorId)!;
-      const nextFloor = findFloor(building, node.floorId)!;
-      current.transition = {
-        connectorId: step.via.connector.id,
-        connectorType: step.via.connector.type,
-        toFloorId: node.floorId,
+  const resolve = (q: RouteQuery, target: RouteTarget, tag: string): Goal => {
+    if ('roomId' in target) {
+      const ref = findRoom(building, target.roomId);
+      if (!ref) throw new RouteError('UNKNOWN_ROOM', `Không tìm thấy phòng "${target.roomId}"`);
+      const finalPoint = roomDestination(ref.room);
+      return {
+        keys: roomGoals(ref.floor, ref.room),
+        finalPoint,
+        entryRoom: ref.room,
+        to: { floorId: ref.floor.id, position: finalPoint ?? { x: 0, y: 0 }, roomId: ref.room.id },
+        destinationName: ref.room.code ? `${ref.room.name} (${ref.room.code})` : ref.room.name,
       };
-      transitionSeconds += connectorTravelSeconds(
-        step.via.connector.type,
-        nextFloor.elevation - prevFloor.elevation,
-      );
-      current = null;
     }
-    if (!current) {
-      current = { floorId: node.floorId, path: [] };
-      segments.push(current);
+    if ('landmarkId' in target) {
+      const ref = findLandmark(building, target.landmarkId);
+      if (!ref) {
+        throw new RouteError('UNKNOWN_LANDMARK', `Không tìm thấy mốc "${target.landmarkId}"`);
+      }
+      const { floor, landmark } = ref;
+      // Mốc nằm trong một phòng: đi vào phòng qua cửa rồi tới mốc (không xuyên tường).
+      const room = floor.rooms.find((r) => pointInPolygon(landmark.position, r.polygon));
+      return {
+        keys: room ? roomGoals(floor, room) : new Set([q.attach(floor, landmark.position, tag)]),
+        finalPoint: landmark.position,
+        entryRoom: room,
+        to: { floorId: floor.id, position: landmark.position, landmarkId: landmark.id },
+        destinationName: landmark.name,
+      };
     }
-    current.path.push(node.position);
-  }
-  if (finalPoint) {
-    const path = segments[segments.length - 1]!.path;
-    const lastFloor = findFloor(building, segments[segments.length - 1]!.floorId)!;
-    // Nút phòng (giữa phòng) chỉ là điểm trung gian: từ cửa đi thẳng tới đích nếu không vướng tường.
-    const goalNode = g.nodes.get(steps[steps.length - 1]!.key)!.node;
-    const beforeGoal = path[path.length - 2];
-    if (
-      goalNode?.kind === 'room' &&
-      beforeGoal &&
-      !lastFloor.walls.some((w) => {
-        // Cửa nằm ngay trên tường: bỏ qua giao điểm tại chính điểm cửa.
-        const hit = segmentIntersection(beforeGoal, finalPoint, w.start, w.end);
-        return hit !== null && distance(hit, beforeGoal) > 0.05;
-      })
-    ) {
-      path.pop();
-    }
-    path.push(finalPoint);
-  }
-  for (const s of segments) s.path = simplifyPath(s.path);
+    const floor = floorOf(target.floorId);
+    return {
+      keys: new Set([q.attach(floor, target.position, tag)]),
+      to: { floorId: floor.id, position: target.position },
+      destinationName: 'điểm đến',
+    };
+  };
 
-  // Cửa vào phòng đích: nút cửa cuối cùng trên đường đi (cùng tầng với đích).
-  let entry: RouteEntry | undefined;
-  if (entryRoom) {
-    const lastFloorId = segments[segments.length - 1]!.floorId;
-    for (let i = steps.length - 1; i >= 0; i--) {
-      const n = g.nodes.get(steps[i]!.key)!;
-      if (n.floorId !== lastFloorId) break;
-      if (n.node?.kind === 'door' || n.node?.kind === 'entrance') {
-        entry = {
-          floorId: n.floorId,
-          position: n.position,
-          openingId: n.node.refId,
-          roomId: entryRoom.id,
-          label: `Cửa ${entryRoom.code || entryRoom.name}`,
+  const assemble = (q: RouteQuery, from: Location, goal: Goal, steps: PathStep<Arc>[]): Route => {
+    const { finalPoint, entryRoom, destinationName } = goal;
+    const goalNode = q.node(steps[steps.length - 1]!.key)!;
+    const to = { ...goal.to, position: finalPoint ?? goalNode.position };
+
+    // Chia đường đi theo tầng.
+    const segments: RouteSegment[] = [];
+    let current: RouteSegment | null = null;
+    let transitionSeconds = 0;
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i]!;
+      const node = q.node(step.key)!;
+      const prevNode = i > 0 ? q.node(steps[i - 1]!.key) : undefined;
+      if (current && step.via?.connector && prevNode && prevNode.floorId !== node.floorId) {
+        current.transition = {
+          connectorId: step.via.connector.id,
+          connectorType: step.via.connector.type,
+          toFloorId: node.floorId,
         };
-        break;
+        transitionSeconds += connectorTravelSeconds(
+          step.via.connector.type,
+          floorOf(node.floorId).elevation - floorOf(prevNode.floorId).elevation,
+        );
+        current = null;
+      }
+      if (!current) {
+        current = { floorId: node.floorId, path: [] };
+        segments.push(current);
+      }
+      current.path.push(node.position);
+    }
+    if (finalPoint) {
+      const path = segments[segments.length - 1]!.path;
+      const lastFloor = floorOf(segments[segments.length - 1]!.floorId);
+      // Nút phòng (giữa phòng) chỉ là điểm trung gian: từ cửa đi thẳng tới đích nếu không vướng
+      // tường (ô cửa không tính là tường).
+      const beforeGoal = path[path.length - 2];
+      if (
+        goalNode.node?.kind === 'room' &&
+        beforeGoal &&
+        !crossesWall(wallsOf(lastFloor), beforeGoal, finalPoint, 0.05)
+      ) {
+        path.pop();
+      }
+      path.push(finalPoint);
+    }
+    for (const s of segments) s.path = simplifyPath(s.path);
+
+    // Cửa vào phòng đích: nút cửa cuối cùng trên đường đi (cùng tầng với đích).
+    let entry: RouteEntry | undefined;
+    if (entryRoom) {
+      const lastFloorId = segments[segments.length - 1]!.floorId;
+      for (let i = steps.length - 1; i >= 0; i--) {
+        const n = q.node(steps[i]!.key)!;
+        if (n.floorId !== lastFloorId) break;
+        if (n.node?.kind === 'door' || n.node?.kind === 'entrance') {
+          entry = {
+            floorId: n.floorId,
+            position: n.position,
+            openingId: n.node.refId,
+            roomId: entryRoom.id,
+            label: `Cửa ${entryRoom.code || entryRoom.name}`,
+          };
+          break;
+        }
       }
     }
-  }
 
-  const floorName = (id: Id) => findFloor(building, id)?.name ?? id;
-  const instructions: RouteInstruction[] = [
-    {
-      type: 'start',
-      text: `Bắt đầu tại vị trí hiện tại (${floorName(from.floorId)})`,
-      floorId: from.floorId,
-      distance: 0,
-    },
-  ];
-  for (const [i, s] of segments.entries()) {
-    const walk = walkInstructions(s.path, s.floorId);
-    const isLast = i === segments.length - 1;
-    instructions.push(
-      ...(isLast && entry && entryRoom ? withEntryStep(walk, s.path, entry, entryRoom) : walk),
-    );
-    if (s.transition) {
-      const verb = CONNECTOR_VERB[s.transition.connectorType];
-      const fromLevel = findFloor(building, s.floorId)!.level;
-      const toLevel = findFloor(building, s.transition.toFloorId)!.level;
-      instructions.push({
-        type: verb.type,
-        text: `${verb.label} ${toLevel > fromLevel ? 'lên' : 'xuống'} ${floorName(s.transition.toFloorId)}`,
-        floorId: s.floorId,
+    const floorName = (id: Id) => floors.get(id)?.name ?? id;
+    const instructions: RouteInstruction[] = [
+      {
+        type: 'start',
+        text: `Bắt đầu tại vị trí hiện tại (${floorName(from.floorId)})`,
+        floorId: from.floorId,
         distance: 0,
-      });
+      },
+    ];
+    for (const [i, s] of segments.entries()) {
+      const walk = walkInstructions(s.path, s.floorId);
+      const isLast = i === segments.length - 1;
+      instructions.push(
+        ...(isLast && entry && entryRoom ? withEntryStep(walk, s.path, entry, entryRoom) : walk),
+      );
+      if (s.transition) {
+        const verb = CONNECTOR_VERB[s.transition.connectorType];
+        const fromLevel = floorOf(s.floorId).level;
+        const toLevel = floorOf(s.transition.toFloorId).level;
+        instructions.push({
+          type: verb.type,
+          text: `${verb.label} ${toLevel > fromLevel ? 'lên' : 'xuống'} ${floorName(s.transition.toFloorId)}`,
+          floorId: s.floorId,
+          distance: 0,
+        });
+      }
     }
-  }
-  const last = segments[segments.length - 1]!;
-  instructions.push({
-    type: 'arrive',
-    text: `Đến ${destinationName}`,
-    floorId: last.floorId,
-    distance: 0,
-  });
+    const last = segments[segments.length - 1]!;
+    instructions.push({
+      type: 'arrive',
+      text: `Đến ${destinationName}`,
+      floorId: last.floorId,
+      distance: 0,
+    });
 
-  const walkDistance = segments.reduce((sum, s) => sum + polylineLength(s.path), 0);
-  return {
-    buildingId: building.id,
-    from,
-    to,
-    distance: walkDistance,
-    estimatedSeconds: Math.round(walkDistance / WALK_SPEED + transitionSeconds),
-    segments,
-    instructions,
-    ...(entry ? { entry } : {}),
+    const walkDistance = segments.reduce((sum, s) => sum + polylineLength(s.path), 0);
+    return {
+      buildingId: building.id,
+      from,
+      to,
+      distance: walkDistance,
+      estimatedSeconds: Math.round(walkDistance / WALK_SPEED + transitionSeconds),
+      segments,
+      instructions,
+      ...(entry ? { entry } : {}),
+    };
   };
+
+  const routes = (from: Location, targets: readonly RouteTarget[]): (Route | null)[] => {
+    const fromFloor = floorOf(from.floorId);
+    const q = new RouteQuery(g, wallsOf);
+    const start = q.attach(fromFloor, from.position, 'start');
+    const goals = targets.map((t, i) => resolve(q, t, `goal${i}`));
+
+    // Một lần Dijkstra; dừng khi mọi điểm đến đều đã có ít nhất một nút đích được chốt.
+    const goalsOfKey = new Map<Key, number[]>();
+    goals.forEach((goal, i) => {
+      for (const k of goal.keys) goalsOfKey.set(k, [...(goalsOfKey.get(k) ?? []), i]);
+    });
+    const reached: (Key | undefined)[] = goals.map(() => undefined);
+    let remaining = goals.length;
+    const tree = dijkstra(start, q.neighbors, (key) => {
+      for (const i of goalsOfKey.get(key) ?? []) {
+        if (reached[i] === undefined) {
+          reached[i] = key;
+          remaining--;
+        }
+      }
+      return remaining === 0;
+    });
+
+    return goals.map((goal, i) => {
+      const key = reached[i];
+      const steps = key === undefined ? null : pathTo(tree, key);
+      return steps ? assemble(q, from, goal, steps) : null;
+    });
+  };
+
+  return {
+    building,
+    options,
+    routes,
+    route: (from, target) => routes(from, [target])[0]!,
+    assertTarget: (target) => void resolve(new RouteQuery(g, wallsOf), target, 'check'),
+  };
+}
+
+/**
+ * Tìm đường ngắn nhất (theo thời gian) từ `from` tới một phòng, một mốc hoặc một vị trí.
+ * Trả về null nếu không có đường đi. Tìm nhiều lần trên cùng một toà: dùng `createBuildingRouter`.
+ */
+export function findRoute(
+  building: Building,
+  from: Location,
+  target: RouteTarget,
+  options: RouteOptions = {},
+): Route | null {
+  return createBuildingRouter(building, options).route(from, target);
 }

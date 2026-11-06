@@ -60,4 +60,21 @@ describe('validateBuilding', () => {
     const codes = validateBuilding(building).issues.map((i) => i.code);
     expect(codes).toEqual(expect.arrayContaining(['NAV_DISCONNECTED', 'DUPLICATE_ROOM_CODE']));
   });
+
+  it('cảnh báo cạnh đồ thị đi xuyên tường (không qua cửa)', () => {
+    const building = createSampleBuilding();
+    const floor = building.floors[0]!;
+    // Từ trong phòng khám Nội xuyên thẳng qua tường xuống hành lang.
+    floor.navGraph.nodes.push(
+      { id: 'n_in', kind: 'corridor', position: { x: 0.3, y: 4.5 } },
+      { id: 'n_out', kind: 'corridor', position: { x: 0.5, y: 10 } },
+    );
+    floor.navGraph.edges.push({ id: 'e_wall', from: 'n_in', to: 'n_out' });
+    const issues = validateBuilding(building).issues;
+    expect(issues).toContainEqual(
+      expect.objectContaining({ code: 'NAV_EDGE_THROUGH_WALL', refId: 'e_wall' }),
+    );
+    // Cạnh qua ô cửa (dữ liệu mẫu) không bị báo.
+    expect(issues.filter((i) => i.code === 'NAV_EDGE_THROUGH_WALL')).toHaveLength(1);
+  });
 });

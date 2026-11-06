@@ -13,6 +13,7 @@ import {
   campusLevel,
   footprintCenter,
   placedFootprint,
+  pointInPolygon,
   type BuildingPlacement,
   type Department,
   type Floor,
@@ -33,7 +34,16 @@ import {
   VEHICLE_ACCESS_STYLE,
 } from '../two-d/siteLayers';
 import type { MapLocation } from '../types';
-import { FitCamera, FloorMesh, Route3D, TextLabel, type Floor3DEditor } from './Building3D';
+import {
+  FitCamera,
+  FloorMesh,
+  LocationMarker3D,
+  Route3D,
+  TextLabel,
+  type Floor3DEditor,
+} from './Building3D';
+import { POINT_MODEL_MATERIAL } from './pointModels';
+import { SitePoiModels } from './Points3D';
 import { prism, toVec3, type Vec3 } from './geometry';
 import { buildSiteMeshes, disposeSiteMeshes, PLINTH } from './site3d';
 import { stairLayouts } from './stairs';
@@ -79,6 +89,8 @@ export interface Campus3DProps {
   route?: Route | null;
   location?: MapLocation | null;
   highlightRoomId?: Id | null;
+  /** Điểm ngoài trời đang chọn / là điểm đến (huy hiệu viền cam). */
+  highlightPoiId?: Id | null;
   destinationLabel?: string;
   onRoomClick?: (room: Room) => void;
   onBuildingClick?: (buildingId: Id) => void;
@@ -103,6 +115,7 @@ export function Campus3D({
   route,
   location,
   highlightRoomId,
+  highlightPoiId,
   destinationLabel,
   onRoomClick,
   onBuildingClick,
@@ -148,6 +161,15 @@ export function Campus3D({
     },
     [siteMeshes],
   );
+
+  /** Điểm ngoài trời nằm trên sân / sảnh nâng cao thì đặt lên mặt bệ. */
+  const poiGround = useMemo(() => {
+    const raised = (site?.areas ?? []).filter(
+      (a) => (a.kind === 'plaza' || a.kind === 'dropoff') && a.polygon.length >= 3,
+    );
+    return (poi: { position: Point }) =>
+      raised.some((a) => pointInPolygon(poi.position, a.polygon)) ? PLINTH : 0;
+  }, [site]);
 
   const focus = buildings.find((b) => b.id === focusBuildingId);
   const cut =
@@ -203,6 +225,9 @@ export function Campus3D({
           <meshStandardMaterial color={ground} />
         </mesh>
         {siteMeshes && <Site3D meshes={siteMeshes} />}
+        {site && site.pois.length > 0 && (
+          <SitePoiModels pois={site.pois} ground={poiGround} highlightId={highlightPoiId} />
+        )}
         {links.map((l) => (
           <Link3D key={l.id} link={l} selected={l.id === selectedLinkId} theme={theme} />
         ))}
@@ -297,11 +322,7 @@ function Site3D({ meshes }: { meshes: ReturnType<typeof buildSiteMeshes> }) {
           />
         </mesh>
       )}
-      {meshes.gates && (
-        <mesh geometry={meshes.gates}>
-          <meshStandardMaterial color="#334155" />
-        </mesh>
-      )}
+      {meshes.gates && <mesh geometry={meshes.gates} material={POINT_MODEL_MATERIAL} />}
       {meshes.zebras && (
         <mesh geometry={meshes.zebras}>
           <meshStandardMaterial color="#f8fafc" side={THREE.DoubleSide} />
@@ -458,6 +479,7 @@ function PlacedBuilding3D({
             departments={departments}
             theme={theme}
             highlightRoomId={isCut ? highlightRoomId : null}
+            highlightLandmarkId={isCut ? route?.to.landmarkId : null}
             wallHeightScale={isCut ? CUT_WALL_SCALE : 1}
             stairs={stairs}
             onRoomClick={isCut ? onRoomClick : undefined}
@@ -485,11 +507,11 @@ function PlacedBuilding3D({
         />
       )}
       {location && floorY.has(location.floorId) && (
-        <mesh position={toVec3(location.position, floorY.get(location.floorId)! + 0.4)}>
-          <sphereGeometry args={[0.4, 24, 16]} />
-          <meshStandardMaterial color={theme.location} />
-          <TextLabel position={[0, 0.8, 0]} text="Bạn ở đây" color={theme.location} />
-        </mesh>
+        <LocationMarker3D
+          position={toVec3(location.position, floorY.get(location.floorId)!)}
+          heading={location.heading}
+          theme={theme}
+        />
       )}
       <TextLabel
         position={[center.x, top + 1.5, center.y]}

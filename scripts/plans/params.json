@@ -1,0 +1,43 @@
+{
+  "s_ov": 0.12144,
+  "scales": {
+    "0": 0.05702,
+    "1": 0.08658,
+    "2": 0.08453,
+    "3": 0.08385,
+    "4": 0.08397,
+    "5": 0.05447,
+    "6": 0.05447,
+    "7": 0.05447,
+    "8": 0.03298,
+    "9": 0.03162,
+    "10": 0.03378,
+    "11": 0.03036,
+    "12": 0.0267
+  },
+  "rot": { "1": 0, "8": 0, "9": 0, "10": 270, "11": 0 },
+  "overview_name": "tong-the",
+  "buildings": {
+    "bld_lan_main": {
+      "pages": [
+        [1, "nha-chinh-t1"],
+        [0, "nha-chinh-ban-am"],
+        [2, "nha-chinh-t2"],
+        [3, "nha-chinh-t3"],
+        [4, "nha-chinh-t4"],
+        [5, "nha-chinh-t5"],
+        [6, "nha-chinh-t6"],
+        [7, "nha-chinh-t7"]
+      ]
+    },
+    "bld_lan_cnk": { "pages": [[8, "khoa-chong-nhiem-khuan"]] },
+    "bld_lan_dd": { "pages": [[9, "khoa-dinh-duong"]] },
+    "bld_lan_gpbl": { "pages": [[10, "khoa-giai-phau-benh"]] },
+    "bld_lan_lay": {
+      "pages": [
+        [11, "khoa-lay-t1"],
+        [12, "khoa-lay-t2"]
+      ]
+    }
+  }
+}

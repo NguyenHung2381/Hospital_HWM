@@ -66,7 +66,7 @@ chứng chỉ tự ký. Mock tự chuyển sang chế độ chặn `fetch` vì S
 
 Các cách xác định vị trí: chụp ảnh (camera trực tiếp hoặc chọn ảnh), tự chạm lên bản đồ, bắt đầu từ cửa
 chính, hoặc mã QR dán trong viện: `https://<app>/?b=<buildingId>&at=<floorId>,<x>,<y>`
-(vd. `?b=bld_hwn_demo&at=floor_1,12.5,10`; `?b=` một mình chỉ chọn toà nhà). Mã cũ chỉ có `?at=` vẫn dùng
+(vd. `?b=bld_lan_main&at=bld_lan_main_t1,12.5,10`; `?b=` một mình chỉ chọn toà nhà). Mã cũ chỉ có `?at=` vẫn dùng
 được — app tự tìm toà có tầng đó.
 Bản build production là PWA (cài lên màn hình chính); icon sinh bằng `node scripts/gen-icons.mjs`.
 
@@ -145,7 +145,7 @@ DIMENSION được dựng thành nền vector đúng kích thước thật (đơ
 Lưu) và xoá toà. Các trang xem dữ liệu một toà (Tổng quan, Khoa phòng, Lưu lượng) vẫn chọn toà ở ô "Toà nhà" trên
 thanh trên cùng (lựa chọn được nhớ lại). Mỗi toà là một bản đồ riêng với version riêng; ID tầng, phòng phải duy nhất trên toàn hệ thống. Ở app người
 dùng, tên toà dưới tiêu đề là ô chọn toà, và ô tìm kiếm có thêm nhóm "Ở toà nhà khác" (chọn sẽ chuyển sang toà
-đó). Chưa có chỉ đường liên toà. Dữ liệu mock có sẵn 2 toà (`bld_hwn_demo`, `bld_hwn_annex`).
+đó). Chưa có chỉ đường liên toà. Dữ liệu mock chỉ có bệnh viện thật theo bộ bản vẽ LAN (cơ sở `campus_lan`, các toà `bld_lan_*`); cơ sở và hai toà mẫu (`bld_hwn_demo`, `bld_hwn_annex`) chỉ còn dùng trong test (`resetMockDb({ sample: true })`).
 
 **Vẽ toà nhà và Khuôn viên — hai trang riêng**: mỗi cơ sở (`Campus`,
 [campus.ts](packages/map-core/src/campus.ts)) gồm các toà đặt trên cùng một hệ toạ độ — `BuildingPlacement` = vị

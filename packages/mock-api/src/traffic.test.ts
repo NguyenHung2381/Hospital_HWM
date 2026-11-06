@@ -3,6 +3,7 @@ import { setupServer } from 'msw/node';
 import { createApiClient, createTrafficStream, type TrafficStreamStatus } from '@hwn/api-client';
 import type { TrafficSnapshot } from '@hwn/map-core';
 import { createSampleBuilding, SAMPLE_BUILDING_ID } from '@hwn/map-core/sample';
+import { resetMockDb } from './db';
 import { createHandlers } from './handlers';
 import { busyness, TrafficSimulator } from './traffic';
 
@@ -79,7 +80,10 @@ describe('createTrafficStream', () => {
   const BASE = 'http://localhost/api';
   const server = setupServer(...createHandlers(BASE));
   const api = createApiClient({ baseURL: BASE });
-  beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
+  beforeAll(() => {
+    resetMockDb({ sample: true });
+    server.listen({ onUnhandledRequest: 'bypass' });
+  });
   afterAll(() => server.close());
 
   /** Chạy stream cho tới khi nhận ảnh chụp đầu tiên (hoặc hết thời gian). */

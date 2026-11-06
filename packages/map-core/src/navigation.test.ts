@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { boundsOf, pointInPolygon } from './geometry';
 import { compassToHeading, headingToCompass, searchLandmarks, searchRooms } from './lookup';
-import { findRoute, RouteError } from './navigation';
+import { createBuildingRouter, findRoute, RouteError } from './navigation';
+import { crossesWall, solidWallObstacles } from './obstacles';
 import { createSampleBuilding } from './sample';
+import type { Building, Route } from './types';
 
 const building = createSampleBuilding();
 const entrance = { floorId: 'floor_1', position: { x: 1, y: 10 } };
@@ -173,5 +176,83 @@ describe('la bàn', () => {
     expect(compassToHeading(b, 0)).toBe(0);
     expect(compassToHeading(b, 180)).toBe(180);
     expect(headingToCompass(b, compassToHeading(b, 37))).toBeCloseTo(37);
+  });
+});
+
+describe('gắn vị trí tự do vào đồ thị', () => {
+  /** Số đoạn của tuyến (trên tầng `floorId`) đi xuyên tường đặc. */
+  const wallHits = (b: Building, route: Route) =>
+    route.segments.reduce((n, s) => {
+      const walls = solidWallObstacles(b.floors.find((f) => f.id === s.floorId)!);
+      return n + s.path.slice(1).filter((p, i) => crossesWall(walls, s.path[i]!, p, 0.05)).length;
+    }, 0);
+
+  it('đứng trong phòng: đi ra qua cửa, không xuyên tường sang hành lang', () => {
+    // Sát tường dưới của phòng khám Nội: hành lang ngay sau tường gần hơn cửa phòng.
+    const route = findRoute(
+      building,
+      { floorId: 'floor_1', position: { x: 0.3, y: 4.5 } },
+      { roomId: 'floor_1_room_top2' },
+    )!;
+    expect(wallHits(building, route)).toBe(0);
+  });
+
+  it('không tuyến nào từ trong phòng đi xuyên tường', () => {
+    for (const floor of building.floors) {
+      const target = floor.rooms[0]!;
+      for (const room of floor.rooms) {
+        const box = boundsOf(room.polygon)!;
+        for (let x = box.minX + 0.3; x < box.maxX; x += 1) {
+          for (let y = box.minY + 0.3; y < box.maxY; y += 1) {
+            if (!pointInPolygon({ x, y }, room.polygon)) continue;
+            const route = findRoute(
+              building,
+              { floorId: floor.id, position: { x, y } },
+              { roomId: target.id },
+            );
+            if (route) expect(wallHits(building, route), `${room.name} (${x}, ${y})`).toBe(0);
+          }
+        }
+      }
+    }
+  });
+
+  it('điểm đầu và điểm cuối trên cùng một cạnh: đi thẳng, không vòng ra đầu cạnh', () => {
+    const route = findRoute(
+      building,
+      { floorId: 'floor_1', position: { x: 11, y: 10 } },
+      { floorId: 'floor_1', position: { x: 12, y: 10 } },
+    )!;
+    expect(route.distance).toBeCloseTo(1);
+    expect(route.segments[0]!.path).toEqual([
+      { x: 11, y: 10 },
+      { x: 12, y: 10 },
+    ]);
+  });
+});
+
+describe('createBuildingRouter', () => {
+  it('nhiều điểm đến trong một lần cho cùng kết quả như findRoute', () => {
+    const router = createBuildingRouter(building);
+    const targets = [
+      { roomId: 'floor_1_room_top1' },
+      { roomId: 'floor_2_room_top0' },
+      { landmarkId: 'lm_atm_1' },
+      { floorId: 'floor_1', position: { x: 20, y: 10.5 } },
+    ];
+    const many = router.routes(entrance, targets);
+    targets.forEach((t, i) => expect(many[i]).toEqual(findRoute(building, entrance, t)));
+  });
+
+  it('báo lỗi điểm đến không hợp lệ', () => {
+    const b = createSampleBuilding();
+    const floor = b.floors[0]!;
+    floor.navGraph.nodes = floor.navGraph.nodes.filter((n) => n.refId !== 'floor_1_room_top1');
+    const router = createBuildingRouter(b);
+    expect(() => router.assertTarget({ roomId: 'floor_1_room_top1' })).toThrow(
+      expect.objectContaining({ code: 'ROOM_NOT_IN_GRAPH' }),
+    );
+    expect(() => router.assertTarget({ roomId: 'khong_co' })).toThrow(RouteError);
+    expect(() => router.assertTarget({ roomId: 'floor_1_room_top2' })).not.toThrow();
   });
 });

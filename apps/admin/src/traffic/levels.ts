@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { palette } from '@hwn/theme';
 
 /** Ngưỡng số người trên một đoạn đường. */
 export interface Thresholds {
@@ -47,9 +48,9 @@ export const levelOf = (count: number, t: Thresholds): Level =>
 
 /** Màu trạng thái cố định — luôn đi kèm icon + chữ, không dùng màu một mình. */
 export const LEVEL_STYLE: Record<Level, { label: string; color: string }> = {
-  normal: { label: 'Bình thường', color: '#0ca30c' },
-  busy: { label: 'Đông', color: '#fab219' },
-  overload: { label: 'Quá tải', color: '#d03b3b' },
+  normal: { label: 'Bình thường', color: palette.success },
+  busy: { label: 'Đông', color: palette.warning },
+  overload: { label: 'Quá tải', color: palette.error },
 };
 
 /**

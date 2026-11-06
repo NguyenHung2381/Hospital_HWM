@@ -9,6 +9,7 @@ export const INSTRUCTION_ICON: Record<RouteInstructionType, IconName> = {
   'take-elevator': 'elevator',
   'take-stairs': 'stairs',
   'take-escalator': 'escalator',
+  'take-ramp': 'ramp',
   'enter-room': 'door',
   arrive: 'flag',
 };

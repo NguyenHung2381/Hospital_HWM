@@ -154,7 +154,10 @@ export function RoomSearch({ building }: { building: Building }) {
         {rooms.data?.map(({ room, floorName, department }) => (
           <li key={room.id}>
             <Link to={`/navigate/${room.id}`} className="list-item">
-              <span className="dot" style={{ background: department?.color ?? '#94a3b8' }} />
+              <span
+                className="dot"
+                style={{ background: department?.color ?? 'var(--color-gray-400)' }}
+              />
               <span className="list-item-main">
                 <strong>{room.name}</strong>
                 <span className="muted">
@@ -184,7 +187,10 @@ export function RoomSearch({ building }: { building: Building }) {
                     if (!canCampusRoute(buildingId)) setBuildingId(buildingId);
                   }}
                 >
-                  <span className="dot" style={{ background: department?.color ?? '#94a3b8' }} />
+                  <span
+                    className="dot"
+                    style={{ background: department?.color ?? 'var(--color-gray-400)' }}
+                  />
                   <span className="list-item-main">
                     <strong>{room.name}</strong>
                     <span className="muted">

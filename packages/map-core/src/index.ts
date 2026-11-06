@@ -3,6 +3,8 @@ export * from './geometry';
 export * from './id';
 export * from './lookup';
 export * from './validate';
+export * from './graph';
+export * from './obstacles';
 export * from './navigation';
 export * from './rooms';
 export * from './navgen';

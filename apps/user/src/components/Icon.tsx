@@ -64,6 +64,7 @@ const PATHS = {
   ),
   stairs: <path d="M3 20h5v-5h5v-5h5V5h3" />,
   escalator: <path d="M3 19h4l10-12h4" />,
+  ramp: <path d="M3 19h18L21 9z" />,
   flag: <path d="M5 21V4M5 4h11l-2 4 2 4H5" />,
   play: <path d="M7 4.5v15l12-7.5z" fill="currentColor" />,
   pause: <path d="M8 5v14M16 5v14" />,

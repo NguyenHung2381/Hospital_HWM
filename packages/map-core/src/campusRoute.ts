@@ -22,19 +22,27 @@ import {
   type Campus,
   type SiteArea,
   type SitePath,
+  type SitePlan,
   type SitePoi,
 } from './campus';
 import {
+  boundsOf,
   distance,
   normalize,
   offsetPolyline,
-  pointInPolygon,
   pointOnWall,
   projectPointOnSegment,
   segmentIntersection,
   sub,
 } from './geometry';
-import { findRoute, WALK_SPEED, type RouteOptions } from './navigation';
+import { dijkstra, pathTo } from './graph';
+import {
+  createBuildingRouter,
+  WALK_SPEED,
+  type BuildingRouter,
+  type RouteOptions,
+  type RouteTarget,
+} from './navigation';
 import type {
   Building,
   Id,
@@ -360,11 +368,7 @@ export function buildSiteWalkGraph(
   for (const area of areas) {
     if (area.kind !== 'plaza' || area.polygon.length < 3) continue;
     const poly = area.polygon;
-    const near = (p: Point) =>
-      pointInPolygon(p, poly) ||
-      poly.some(
-        (q, i) => projectPointOnSegment(p, q, poly[(i + 1) % poly.length]!).distance <= PLAZA_REACH,
-      );
+    const near = nearPolygon(poly, PLAZA_REACH);
     const anchors = new Map<string, Point>();
     for (const s of segs) {
       for (const end of [s.a, s.b]) if (near(end)) anchors.set(pointKey(end), end);
@@ -416,44 +420,55 @@ export function buildSiteWalkGraph(
   return g;
 }
 
-/** Dijkstra trên đồ thị dạng danh sách kề. Trả về chuỗi cạnh đã đi, hoặc null. */
-function shortest(g: Graph, start: string, goal: string): { edges: Edge[]; cost: number } | null {
-  const dist = new Map<string, number>([[start, 0]]);
-  const prev = new Map<string, { from: string; edge: Edge }>();
-  const done = new Set<string>();
-  // Đồ thị nhỏ (vài trăm nút) nên dùng tìm min tuyến tính cho gọn.
-  const open = new Set<string>([start]);
-  while (open.size) {
-    let u = '';
-    let best = Infinity;
-    for (const k of open) {
-      const d = dist.get(k)!;
-      if (d < best) {
-        best = d;
-        u = k;
+/**
+ * Hàm kiểm tra "điểm nằm trong đa giác hoặc cách mép không quá `reach`" — như
+ * `pointInPolygon(p, poly) || khoảng cách tới cạnh ≤ reach` nhưng chia ô để mỗi lần chỉ xét các
+ * cạnh gần điểm (mặt lát nối quanh sảnh có hàng chục đỉnh, và được hỏi hàng chục nghìn lần).
+ */
+function nearPolygon(poly: readonly Point[], reach: number): (p: Point) => boolean {
+  const box = boundsOf(poly);
+  if (!box) return () => false;
+  const CELL = 2;
+  const minX = box.minX - reach;
+  const minY = box.minY - reach;
+  const maxX = box.maxX + reach;
+  const maxY = box.maxY + reach;
+  const cols = Math.max(1, Math.ceil((maxX - minX) / CELL));
+  const rows = Math.max(1, Math.ceil((maxY - minY) / CELL));
+  const col = (x: number) => Math.min(cols - 1, Math.max(0, Math.floor((x - minX) / CELL)));
+  const row = (y: number) => Math.min(rows - 1, Math.max(0, Math.floor((y - minY) / CELL)));
+  /** Cạnh có thể cách ô ≤ reach. */
+  const cellEdges: number[][] = Array.from({ length: cols * rows }, () => []);
+  /** Cạnh cắt dải ngang của hàng (cho phép đếm giao điểm của tia ngang). */
+  const rowEdges: number[][] = Array.from({ length: rows }, () => []);
+  const n = poly.length;
+  for (let i = 0; i < n; i++) {
+    const a = poly[i]!;
+    const b = poly[(i + 1) % n]!;
+    const r0 = row(Math.min(a.y, b.y) - reach);
+    const r1 = row(Math.max(a.y, b.y) + reach);
+    const c0 = col(Math.min(a.x, b.x) - reach);
+    const c1 = col(Math.max(a.x, b.x) + reach);
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) cellEdges[r * cols + c]!.push(i);
+    for (let r = row(Math.min(a.y, b.y)); r <= row(Math.max(a.y, b.y)); r++) rowEdges[r]!.push(i);
+  }
+  return (p) => {
+    if (p.x < minX || p.x > maxX || p.y < minY || p.y > maxY) return false;
+    const r = row(p.y);
+    let inside = false;
+    for (const i of rowEdges[r]!) {
+      const a = poly[i]!;
+      const b = poly[(i + 1) % n]!;
+      if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
+        inside = !inside;
       }
     }
-    open.delete(u);
-    if (u === goal) break;
-    done.add(u);
-    for (const e of g.get(u) ?? []) {
-      if (done.has(e.to)) continue;
-      const nd = best + e.cost;
-      if (nd < (dist.get(e.to) ?? Infinity)) {
-        dist.set(e.to, nd);
-        prev.set(e.to, { from: u, edge: e });
-        open.add(e.to);
-      }
+    if (inside) return true;
+    for (const i of cellEdges[r * cols + col(p.x)]!) {
+      if (projectPointOnSegment(p, poly[i]!, poly[(i + 1) % n]!).distance <= reach) return true;
     }
-  }
-  if (!dist.has(goal)) return null;
-  const edges: Edge[] = [];
-  for (let k = goal; k !== start;) {
-    const p = prev.get(k)!;
-    edges.push(p.edge);
-    k = p.from;
-  }
-  return { edges: edges.reverse(), cost: dist.get(goal)! };
+    return false;
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -558,84 +573,68 @@ function dedupe(points: Point[]): Point[] {
   return points.filter((p, i) => i === 0 || distance(p, points[i - 1]!) > 1e-6);
 }
 
-/**
- * Tìm đường (nhanh nhất) giữa hai điểm bất kỳ trong cơ sở, có thể đi qua nhiều toà.
- * @param buildings dữ liệu đầy đủ của các toà trong cơ sở.
- * @returns null nếu không có đường đi.
- */
-export function findCampusRoute(
+/** Chặng trong toà giữa hai nút của đồ thị liên toà (bỏ qua nếu không có đường). */
+function addIndoor(g: Graph, fromKey: string, toKey: string, b: Building, route: Route | null) {
+  if (!route) return;
+  addEdge(g, fromKey, {
+    to: toKey,
+    cost: route.estimatedSeconds,
+    meta: { kind: 'indoor', buildingId: b.id, route },
+  });
+}
+
+/** Phần dựng sẵn của một cơ sở: chỉ phụ thuộc dữ liệu bản đồ, không phụ thuộc điểm đi / đến. */
+interface PreparedCampus {
+  campus: Campus;
+  buildings: ReadonlyMap<Id, Building>;
+  options: CampusRouteOptions;
+  site: SitePlan | undefined;
+  /** Khu vực ngoài trời kèm mặt lát nối quanh sảnh. */
+  areas: SiteArea[];
+  byBuilding: Map<Id, Portal[]>;
+  /** Các điểm cố định gắn vào đồ thị đi bộ (cửa chính, điểm ngoài trời, cổng). */
+  walkTargets: AttachTarget[];
+  /** Đồ thị đi bộ ngoài trời với các điểm cố định. */
+  walk: Graph;
+  /** Cửa ra / vào, cầu nối và các chặng trong toà giữa hai cổng. */
+  fixed: Graph;
+  router(b: Building): BuildingRouter;
+}
+
+function prepareCampus(
   campus: Campus,
   buildings: ReadonlyMap<Id, Building>,
-  from: CampusFrom,
-  target: CampusTarget,
-  options: CampusRouteOptions = {},
-): CampusRoute | null {
-  const inCampus = (id: Id) => campus.buildings.some((pl) => pl.buildingId === id);
-  const building = (id: Id) => {
-    const b = buildings.get(id);
-    if (!b) throw new CampusRouteError('UNKNOWN_BUILDING', `Không tìm thấy toà nhà "${id}"`);
-    if (!inCampus(id)) {
-      throw new CampusRouteError('NOT_IN_CAMPUS', `Toà "${b.name}" không thuộc cơ sở này`);
-    }
-    return b;
-  };
+  options: CampusRouteOptions,
+): PreparedCampus {
   // Phần ngoài trời của cơ sở + sảnh, dốc… của từng toà (đặt theo vị trí toà).
   const site = campusSitePlan(campus, (id) => buildings.get(id)?.exterior);
-  const poi: SitePoi | undefined =
-    'poiId' in target ? site?.pois.find((p) => p.id === target.poiId) : undefined;
-  if ('poiId' in target && !poi) {
-    throw new CampusRouteError('UNKNOWN_POI', `Không tìm thấy điểm "${target.poiId}"`);
-  }
-  const fromBuilding = 'site' in from ? null : building(from.buildingId);
-  const toBuilding = 'buildingId' in target ? building(target.buildingId) : null;
-  const indoorTarget =
-    'roomId' in target
-      ? { roomId: target.roomId }
-      : 'landmarkId' in target
-        ? { landmarkId: target.landmarkId }
-        : 'floorId' in target
-          ? { floorId: target.floorId, position: target.position }
-          : null;
-
   const portals = collectPortals(campus, buildings);
-  const g: Graph = new Map();
-  /** Chặng trong toà, có lưu đệm. */
-  const indoor = (b: Building, a: Location, t: Parameters<typeof findRoute>[2]) => {
-    try {
-      return findRoute(b, a, t, options);
-    } catch {
-      return null;
-    }
-  };
-  const addIndoor = (fromKey: string, toKey: string, b: Building, route: Route | null) => {
-    if (route) {
-      addEdge(g, fromKey, {
-        to: toKey,
-        cost: route.estimatedSeconds,
-        meta: { kind: 'indoor', buildingId: b.id, route },
-      });
-    }
+  const routers = new Map<Id, BuildingRouter>();
+  const router = (b: Building) => {
+    let r = routers.get(b.id);
+    if (!r) routers.set(b.id, (r = createBuildingRouter(b, options)));
+    return r;
   };
 
-  // Đi bộ ngoài trời: nối cửa chính, điểm ngoài trời, điểm xuất phát ngoài trời.
-  const attach: AttachTarget[] = [
-    ...portals.filter((p) => p.outdoor).map((p) => ({ key: `out:${p.key}`, position: p.site })),
-    ...(site?.pois ?? []).map((p) => ({ key: `poi:${p.id}`, position: p.position })),
-    ...(site?.gates ?? []).map((gt) => ({ key: `gate:${gt.id}`, position: gt.position })),
-    ...('site' in from ? [{ key: 'S', position: from.site }] : []),
-  ];
   // Mặt lát nối quanh sảnh (lấp khoảng hở giữa sảnh và các lối đi) cũng là chỗ đi bộ như sân.
   const footprints = campus.buildings.flatMap((pl) => {
     const b = buildings.get(pl.buildingId);
     return b ? [placedFootprint(pl, buildingFootprint(b))] : [];
   });
   const areas = site ? [...site.areas, ...apronAreas(siteAprons(site, footprints))] : [];
-  for (const [k, edges] of buildSiteWalkGraph(site?.paths ?? [], attach, options, areas)) {
-    for (const e of edges) addEdge(g, k, e);
-  }
+
+  // Đi bộ ngoài trời: nối cửa chính, điểm ngoài trời, cổng.
+  const walkTargets: AttachTarget[] = [
+    ...portals.filter((p) => p.outdoor).map((p) => ({ key: `out:${p.key}`, position: p.site })),
+    ...(site?.pois ?? []).map((p) => ({ key: `poi:${p.id}`, position: p.position })),
+    ...(site?.gates ?? []).map((gt) => ({ key: `gate:${gt.id}`, position: gt.position })),
+  ];
+  const walk = buildSiteWalkGraph(site?.paths ?? [], walkTargets, options, areas);
+
+  const fixed: Graph = new Map();
   for (const p of portals.filter((x) => x.outdoor)) {
-    addEdge(g, p.key, { to: `out:${p.key}`, cost: DOOR_PENALTY, meta: { kind: 'door' } });
-    addEdge(g, `out:${p.key}`, { to: p.key, cost: DOOR_PENALTY, meta: { kind: 'door' } });
+    addEdge(fixed, p.key, { to: `out:${p.key}`, cost: DOOR_PENALTY, meta: { kind: 'door' } });
+    addEdge(fixed, `out:${p.key}`, { to: p.key, cost: DOOR_PENALTY, meta: { kind: 'door' } });
   }
 
   // Cầu nối.
@@ -650,43 +649,154 @@ export function findCampusRoute(
     if (!a || !b) continue;
     const d = Math.max(distance(a.site, b.site), 1);
     const cost = (d / WALK_SPEED) * (link.covered || !options.preferCovered ? 1 : 1.6);
-    addEdge(g, a.key, { to: b.key, cost, meta: { kind: 'link', link, from: a.site, to: b.site } });
-    addEdge(g, b.key, { to: a.key, cost, meta: { kind: 'link', link, from: b.site, to: a.site } });
+    addEdge(fixed, a.key, {
+      to: b.key,
+      cost,
+      meta: { kind: 'link', link, from: a.site, to: b.site },
+    });
+    addEdge(fixed, b.key, {
+      to: a.key,
+      cost,
+      meta: { kind: 'link', link, from: b.site, to: a.site },
+    });
   }
 
-  // Đi xuyên một toà: giữa hai cổng bất kỳ của toà.
+  // Đi xuyên một toà: từ mỗi cổng tới mọi cổng khác của toà — một lần Dijkstra cho mỗi cổng.
   const byBuilding = new Map<Id, Portal[]>();
-  for (const p of portals)
+  for (const p of portals) {
     byBuilding.set(p.buildingId, [...(byBuilding.get(p.buildingId) ?? []), p]);
+  }
   for (const [id, list] of byBuilding) {
     const b = buildings.get(id)!;
     for (const p of list) {
-      for (const q of list) {
-        if (p !== q) addIndoor(p.key, q.key, b, indoor(b, p.location, q.location));
+      const others = list.filter((q) => q !== p);
+      let routes: (Route | null)[];
+      try {
+        routes = router(b).routes(
+          p.location,
+          others.map((q) => q.location),
+        );
+      } catch {
+        continue; // Cổng không gắn được vào đồ thị trong toà: bỏ qua cổng này.
       }
+      others.forEach((q, i) => addIndoor(fixed, p.key, q.key, b, routes[i]!));
     }
   }
+
+  return { campus, buildings, options, site, areas, byBuilding, walkTargets, walk, fixed, router };
+}
+
+/**
+ * Bộ tìm đường của một cơ sở: dựng sẵn phần ngoài trời, mặt lát nối, các cổng và chặng trong toà
+ * giữa các cổng — phần tốn thời gian nhất — để dùng lại cho nhiều lần tìm. Dữ liệu được chụp lúc
+ * tạo: cơ sở / toà nhà sửa sau đó cần tạo bộ tìm đường mới.
+ */
+export interface CampusRouter {
+  readonly campus: Campus;
+  readonly options: CampusRouteOptions;
+  route(from: CampusFrom, target: CampusTarget): CampusRoute | null;
+}
+
+export function createCampusRouter(
+  campus: Campus,
+  buildings: ReadonlyMap<Id, Building>,
+  options: CampusRouteOptions = {},
+): CampusRouter {
+  const prepared = prepareCampus(campus, buildings, options);
+  return { campus, options, route: (from, target) => routeInCampus(prepared, from, target) };
+}
+
+/**
+ * Tìm đường (nhanh nhất) giữa hai điểm bất kỳ trong cơ sở, có thể đi qua nhiều toà.
+ * Tìm nhiều lần trên cùng dữ liệu: dùng `createCampusRouter`.
+ * @param buildings dữ liệu đầy đủ của các toà trong cơ sở.
+ * @returns null nếu không có đường đi.
+ */
+export function findCampusRoute(
+  campus: Campus,
+  buildings: ReadonlyMap<Id, Building>,
+  from: CampusFrom,
+  target: CampusTarget,
+  options: CampusRouteOptions = {},
+): CampusRoute | null {
+  return createCampusRouter(campus, buildings, options).route(from, target);
+}
+
+function routeInCampus(
+  ctx: PreparedCampus,
+  from: CampusFrom,
+  target: CampusTarget,
+): CampusRoute | null {
+  const { campus, buildings, options, site, byBuilding } = ctx;
+  const inCampus = (id: Id) => campus.buildings.some((pl) => pl.buildingId === id);
+  const building = (id: Id) => {
+    const b = buildings.get(id);
+    if (!b) throw new CampusRouteError('UNKNOWN_BUILDING', `Không tìm thấy toà nhà "${id}"`);
+    if (!inCampus(id)) {
+      throw new CampusRouteError('NOT_IN_CAMPUS', `Toà "${b.name}" không thuộc cơ sở này`);
+    }
+    return b;
+  };
+  const poi: SitePoi | undefined =
+    'poiId' in target ? site?.pois.find((p) => p.id === target.poiId) : undefined;
+  if ('poiId' in target && !poi) {
+    throw new CampusRouteError('UNKNOWN_POI', `Không tìm thấy điểm "${target.poiId}"`);
+  }
+  const fromBuilding = 'site' in from ? null : building(from.buildingId);
+  const toBuilding = 'buildingId' in target ? building(target.buildingId) : null;
+  const indoorTarget: RouteTarget | null =
+    'roomId' in target
+      ? { roomId: target.roomId }
+      : 'landmarkId' in target
+        ? { landmarkId: target.landmarkId }
+        : 'floorId' in target
+          ? { floorId: target.floorId, position: target.position }
+          : null;
+  // Điểm đến không hợp lệ (phòng không tồn tại, chưa có trong đồ thị…): báo đúng lỗi thay vì
+  // "không có đường".
+  if (toBuilding && indoorTarget) ctx.router(toBuilding).assertTarget(indoorTarget);
+
+  // Xuất phát ngoài trời: gắn thêm điểm xuất phát vào đồ thị đi bộ (dựng lại phần ngoài trời).
+  const walk =
+    'site' in from
+      ? buildSiteWalkGraph(
+          site?.paths ?? [],
+          [...ctx.walkTargets, { key: 'S', position: from.site }],
+          options,
+          ctx.areas,
+        )
+      : ctx.walk;
 
   // Điểm xuất phát / đích.
+  const extra: Graph = new Map();
   if (fromBuilding && !('site' in from)) {
     const start: Location = { floorId: from.floorId, position: from.position };
-    for (const p of byBuilding.get(fromBuilding.id) ?? []) {
-      addIndoor('S', p.key, fromBuilding, indoor(fromBuilding, start, p.location));
-    }
-    if (toBuilding?.id === fromBuilding.id && indoorTarget) {
-      addIndoor('S', 'T', fromBuilding, indoor(fromBuilding, start, indoorTarget));
-    }
+    const list = byBuilding.get(fromBuilding.id) ?? [];
+    const sameTarget = toBuilding?.id === fromBuilding.id ? indoorTarget : null;
+    const routes = ctx
+      .router(fromBuilding)
+      .routes(start, [...list.map((p) => p.location), ...(sameTarget ? [sameTarget] : [])]);
+    list.forEach((p, i) => addIndoor(extra, 'S', p.key, fromBuilding, routes[i]!));
+    if (sameTarget) addIndoor(extra, 'S', 'T', fromBuilding, routes[list.length]!);
   }
   if (toBuilding && indoorTarget) {
+    const router = ctx.router(toBuilding);
     for (const q of byBuilding.get(toBuilding.id) ?? []) {
-      addIndoor(q.key, 'T', toBuilding, indoor(toBuilding, q.location, indoorTarget));
+      addIndoor(extra, q.key, 'T', toBuilding, router.route(q.location, indoorTarget));
     }
   } else if (poi) {
-    addEdge(g, `poi:${poi.id}`, { to: 'T', cost: 0, meta: { kind: 'none' } });
+    addEdge(extra, `poi:${poi.id}`, { to: 'T', cost: 0, meta: { kind: 'none' } });
   }
 
-  const found = shortest(g, 'S', 'T');
-  if (!found) return null;
+  const none: Edge[] = [];
+  const neighbors = (k: string): Edge[] => {
+    const lists = [walk.get(k), ctx.fixed.get(k), extra.get(k)].filter((l) => l !== undefined);
+    return lists.length === 1 ? lists[0]! : lists.length ? lists.flat() : none;
+  };
+  const tree = dijkstra('S', neighbors, (k) => k === 'T');
+  const path = pathTo(tree, 'T');
+  if (!path) return null;
+  const found = { edges: path.slice(1).map((s) => s.via!), cost: tree.dist.get('T')! };
 
   // Gộp các cạnh thành chặng.
   const legs: CampusLeg[] = [];

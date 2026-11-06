@@ -63,6 +63,7 @@ import {
 import { useCurrentFloor, useEditor } from './store';
 import { useTransient } from './transient';
 import { editorCommands } from './useShortcuts';
+import { palette } from '@hwn/theme';
 
 const OPENING_TYPES: { value: OpeningType; label: string }[] = [
   { value: 'door', label: 'Cửa đi' },
@@ -74,6 +75,7 @@ const CONNECTOR_TYPES: { value: ConnectorType; label: string }[] = [
   { value: 'elevator', label: 'Thang máy' },
   { value: 'stairs', label: 'Thang bộ' },
   { value: 'escalator', label: 'Thang cuốn' },
+  { value: 'ramp', label: 'Dốc' },
 ];
 
 const DIRECTIONS: { value: ConnectorDirection; label: string }[] = [
@@ -998,9 +1000,9 @@ function BuildingPanel() {
         <svg viewBox="-20 -20 40 40" width="56" height="56" aria-hidden className="north-dial">
           <circle r="18" fill="none" stroke="currentColor" strokeOpacity="0.25" />
           <g transform={`rotate(${north})`}>
-            <path d="M0 -15 L5 0 L-5 0 Z" fill="#dc2626" />
+            <path d="M0 -15 L5 0 L-5 0 Z" fill={palette.error} />
             <path d="M0 15 L5 0 L-5 0 Z" fill="currentColor" opacity="0.4" />
-            <text y="-16.5" textAnchor="middle" fontSize="7" fontWeight="800" fill="#dc2626">
+            <text y="-16.5" textAnchor="middle" fontSize="7" fontWeight="800" fill={palette.error}>
               B
             </text>
           </g>

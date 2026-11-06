@@ -82,7 +82,7 @@ export function CampusViewer({
   const [legend, setLegend] = useState(false);
   const { campus, level } = data;
   // Phần ngoài trời của cơ sở + sảnh, làn đón, dốc của từng toà.
-  const site = campusViewSite(campus);
+  const site = useMemo(() => campusViewSite(campus), [campus]);
 
   const info = useMemo(() => new Map(campus.buildingInfo.map((i) => [i.id, i])), [campus]);
   const bounds = useMemo(

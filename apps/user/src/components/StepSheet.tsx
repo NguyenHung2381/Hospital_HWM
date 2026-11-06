@@ -132,12 +132,19 @@ export function StepSheet({
         </div>
       </div>
 
-      {next && (
+      {next ? (
         <button type="button" className="step-next" onClick={() => onStep(step + 1)}>
           <span className="muted small">Tiếp theo</span>
           <Icon name={INSTRUCTION_ICON[next.type]} size={18} />
           <span className="ellipsis">{next.text}</span>
         </button>
+      ) : (
+        // Giữ chỗ ở bước cuối để thanh hướng dẫn không thấp đi — khung bản đồ phía trên không đổi
+        // kích thước (đổi kích thước làm canvas cấp phát lại và bản đồ phải vẽ lại).
+        <div className="step-next" aria-hidden style={{ visibility: 'hidden' }}>
+          <span className="muted small">Tiếp theo</span>
+          <Icon name="flag" size={18} />
+        </div>
       )}
 
       <div className="step-nav">

@@ -6,7 +6,6 @@
 import type { TrafficHistoryPoint } from '@hwn/api-client';
 import {
   distance,
-  findRoute,
   lerp,
   projectPointOnSegment,
   type Building,
@@ -15,8 +14,10 @@ import {
   type Id,
   type Location,
   type Point,
+  type Route,
   type TrafficSnapshot,
 } from '@hwn/map-core';
+import { buildingRouter } from './routers';
 
 /** Mức đông theo giờ (0..1): cao điểm sáng ~9h, chiều ~14h30. */
 export function busyness(hour: number): number {
@@ -43,7 +44,7 @@ interface Agent {
   speed: number;
 }
 
-function legsOf(route: NonNullable<ReturnType<typeof findRoute>>): Leg[] {
+function legsOf(route: Route): Leg[] {
   return route.segments
     .filter((s) => s.path.length >= 2)
     .map((s) => ({
@@ -102,7 +103,7 @@ export class TrafficSimulator {
       Math.random() < 0.55 && entrances.length ? pick(entrances) : pick(rooms);
     if (!from) return null;
     try {
-      const route = findRoute(building, from, { roomId: target.roomId });
+      const route = buildingRouter(building).route(from, { roomId: target.roomId });
       const legs = route ? legsOf(route) : [];
       if (!legs.length) return null;
       return { legs, leg: 0, progress: 0, speed: WALK_SPEED * (0.7 + Math.random() * 0.6) };

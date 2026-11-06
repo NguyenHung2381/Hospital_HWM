@@ -89,6 +89,7 @@ export const CONNECTOR_DEFAULTS: Record<
   elevator: { width: 2.4, depth: 2.4, label: 'Thang máy' },
   stairs: { width: 2.6, depth: 5, label: 'Thang bộ' },
   escalator: { width: 1.4, depth: 8, label: 'Thang cuốn' },
+  ramp: { width: 2, depth: 8, label: 'Dốc' },
 };
 
 /** Độ dày (m) mặc định theo loại tường; `height` bỏ trống = cao bằng tầng. */

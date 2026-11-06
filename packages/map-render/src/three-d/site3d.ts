@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import {
   DEFAULT_RAMP_RISE,
   distance,
+  isGateOpen,
   offsetPolyline,
   pointInPolygon,
   polylineLength,
@@ -27,8 +28,10 @@ import {
   type SitePath,
   type SitePlan,
 } from '@hwn/map-core';
-import { crosswalks, cutPolyline, gateShape } from '../two-d/siteGeometry';
+import { crosswalks, cutPolyline, gateShape, pathElbows } from '../two-d/siteGeometry';
 import { mergeAll, prism } from './geometry';
+import { buildGateModel } from './pointModels';
+import { strokeGeometry } from './stroke';
 
 /** Cao độ bệ sảnh / sàn tầng trệt so với mặt đường (m). */
 export const PLINTH = DEFAULT_RAMP_RISE;
@@ -214,6 +217,7 @@ export interface SiteMeshes {
   roofs: THREE.BufferGeometry | null;
   posts: THREE.BufferGeometry | null;
   fences: THREE.BufferGeometry | null;
+  /** Cổng (có màu theo đỉnh — `vertexColors`). */
   gates: THREE.BufferGeometry | null;
   /** Vạch qua đường (cùng vị trí với bản đồ 2D). */
   zebras: THREE.BufferGeometry | null;
@@ -313,25 +317,38 @@ export function buildSiteMeshes(
   const rampSigns: SiteMeshes['rampSigns'] = [];
   const push = (list: THREE.BufferGeometry[], g: THREE.BufferGeometry | null) => g && list.push(g);
 
+  // Đầu đường nối vào đỉnh của đường cùng loại (khuỷu, ngã ba): bo tròn để mặt đường liền khối.
+  const elbows = pathElbows(site.paths);
   for (const p of site.paths) {
     if (p.points.length < 2) continue;
     const pts = p.points;
+    const elbow = elbows.get(p.id);
+    const caps = { roundStart: !!elbow?.start, roundEnd: !!elbow?.end };
     switch (p.kind) {
       case 'vehicle':
       case 'shared': {
         // Làn xe chạy trên mặt sảnh (sảnh là điểm đón / trả khách): mặt sảnh dùng chung, không trải nhựa.
         if (p.kind === 'vehicle' && pts.every((q) => onPlaza(q))) break;
         const cw = p.width - 2 * sidewalkWidth(p);
-        if (p.kind === 'shared') push(paving, ribbon(pts, p.width, lifted(pts, 0.04)));
+        if (p.kind === 'shared')
+          push(paving, strokeGeometry(pts, p.width, lifted(pts, 0.04), caps));
         const edge = colors.edge(p);
         if (edge) {
           // Viền màu chỉ dựng ở phần không nằm trong lòng đường khác / bãi xe.
+          const first = pts[0]!;
+          const last = pts[pts.length - 1]!;
           for (const piece of outsidePieces(pts, (q) => inRoad(q, p) || inLot(q))) {
-            const g = ribbon(piece, cw, lifted(piece, 0.07));
+            const g = strokeGeometry(piece, cw, lifted(piece, 0.07), {
+              roundStart: caps.roundStart && piece[0] === first,
+              roundEnd: caps.roundEnd && piece[piece.length - 1] === last,
+            });
             if (g) edges.push({ geometry: g, color: edge });
           }
         }
-        push(asphalt, ribbon(pts, edge ? Math.max(cw - 0.6, cw * 0.7) : cw, lifted(pts, 0.1)));
+        push(
+          asphalt,
+          strokeGeometry(pts, edge ? Math.max(cw - 0.6, cw * 0.7) : cw, lifted(pts, 0.1), caps),
+        );
         break;
       }
       case 'ramp': {
@@ -402,7 +419,11 @@ export function buildSiteMeshes(
         break;
       }
       case 'pedestrian':
-        push(paving, ribbon(pts, p.width, lifted(pts, 0.06)));
+        // Đầu lối đi bo tròn như bản đồ 2D: chỗ các lối đi gặp nhau liền một mặt lát.
+        push(
+          paving,
+          strokeGeometry(pts, p.width, lifted(pts, 0.06), { roundStart: true, roundEnd: true }),
+        );
         break;
       case 'steps':
       case 'slope': {
@@ -437,7 +458,7 @@ export function buildSiteMeshes(
       }
       case 'covered': {
         const h = lifted(pts, 0.06);
-        push(paving, ribbon(pts, p.width, h));
+        push(paving, strokeGeometry(pts, p.width, h, { roundStart: true, roundEnd: true }));
         push(
           roofs,
           ribbon(
@@ -478,17 +499,10 @@ export function buildSiteMeshes(
     }
   }
 
-  // Cổng: hai trụ hai bên lối qua.
+  // Cổng: trụ cổng + cánh theo kiểu cổng (thanh chắn, 2 cánh, cổng kéo, cổng mở có biển trên).
+  const now = new Date();
   for (const gt of site.gates) {
-    const shape = gateShape(gt, site.paths);
-    const rad = (shape.angle * Math.PI) / 180;
-    const nx = -Math.sin(rad);
-    const ny = Math.cos(rad);
-    for (const k of [shape.half, -shape.half]) {
-      const box = new THREE.BoxGeometry(0.5, 2.4, 0.5);
-      box.translate(gt.position.x + nx * k, 1.2, gt.position.y + ny * k);
-      gates.push(box);
-    }
+    gates.push(buildGateModel(gt, gateShape(gt, site.paths), isGateOpen(gt, now)));
   }
 
   // Vạch qua đường: cùng vị trí với bản đồ 2D, nằm sát mặt đường / mặt dốc tại chỗ đó.

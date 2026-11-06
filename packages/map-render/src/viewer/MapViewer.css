@@ -3,10 +3,10 @@
  * --hwn-map-accent, --hwn-map-surface, --hwn-map-text, --hwn-map-border
  */
 .hwn-map-viewer {
-  --_accent: var(--hwn-map-accent, #0f766e);
+  --_accent: var(--hwn-map-accent, #0a9b4a);
   --_surface: var(--hwn-map-surface, rgb(255 255 255 / 0.94));
-  --_text: var(--hwn-map-text, #0f172a);
-  --_border: var(--hwn-map-border, rgb(15 23 42 / 0.12));
+  --_text: var(--hwn-map-text, #0d1820);
+  --_border: var(--hwn-map-border, rgb(13 24 32 / 0.12));
   position: relative;
   width: 100%;
   height: 100%;
@@ -24,10 +24,10 @@
 
 @media (prefers-color-scheme: dark) {
   .hwn-map-viewer {
-    --_accent: var(--hwn-map-accent, #14b8a6);
-    --_surface: var(--hwn-map-surface, rgb(17 24 39 / 0.94));
-    --_text: var(--hwn-map-text, #e2e8f0);
-    --_border: var(--hwn-map-border, rgb(226 232 240 / 0.14));
+    --_accent: var(--hwn-map-accent, #0a9b4a);
+    --_surface: var(--hwn-map-surface, rgb(26 42 53 / 0.94));
+    --_text: var(--hwn-map-text, #f0f4f6);
+    --_border: var(--hwn-map-border, rgb(226 232 236 / 0.14));
   }
 }
 
@@ -135,7 +135,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #f97316;
+  background: var(--color-accent, #df0984);
 }
 
 .hwn-map-zoom {
@@ -191,7 +191,7 @@
   position: absolute;
   font-size: 9px;
   font-weight: 800;
-  color: #dc2626;
+  color: var(--color-error, #e84545);
   line-height: 1;
   pointer-events: none;
 }

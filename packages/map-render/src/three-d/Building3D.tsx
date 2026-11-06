@@ -22,11 +22,13 @@ import {
   buildElevatorGeometry,
   buildFurnitureGeometry,
   buildSlabGeometry,
-  buildWallGeometry,
+  cachedWallGeometry,
   flatPolygon,
   toVec3,
   type Vec3,
 } from './geometry';
+import { LandmarkModels } from './Points3D';
+import { roundCorners, strokeTriangles } from './stroke';
 import {
   buildStairGeometry,
   disposeStairGeometry,
@@ -157,6 +159,7 @@ export function Building3D({
               departments={building.departments}
               theme={theme}
               highlightRoomId={highlightRoomId}
+              highlightLandmarkId={route?.to.landmarkId}
               wallHeightScale={wallHeightScale}
               stairs={stairs}
               label={floors.length > 1 ? floor.name : undefined}
@@ -177,11 +180,11 @@ export function Building3D({
           />
         )}
         {location && floorY.has(location.floorId) && (
-          <mesh position={toVec3(location.position, floorY.get(location.floorId)! + 0.4)}>
-            <sphereGeometry args={[0.4, 24, 16]} />
-            <meshStandardMaterial color={theme.location} />
-            <TextLabel position={[0, 0.8, 0]} text="Bạn ở đây" color={theme.location} />
-          </mesh>
+          <LocationMarker3D
+            position={toVec3(location.position, floorY.get(location.floorId)!)}
+            heading={location.heading}
+            theme={theme}
+          />
         )}
         <OrbitControls makeDefault enableDamping maxPolarAngle={Math.PI * 0.47} />
         <FitCamera center={frame.center} radius={frame.radius} fitKey={building.id} />
@@ -317,6 +320,8 @@ interface FloorMeshProps {
   departments: readonly Department[];
   theme: MapTheme;
   highlightRoomId?: Id | null;
+  /** Mốc đang là điểm đến (huy hiệu viền cam). */
+  highlightLandmarkId?: Id | null;
   wallHeightScale: number;
   stairs: ReadonlyMap<Id, StairLayout>;
   /** Tên tầng, ghi ở góc tấm sàn để phân biệt các tầng khi xếp chồng. */
@@ -332,6 +337,7 @@ export function FloorMesh({
   departments,
   theme,
   highlightRoomId,
+  highlightLandmarkId,
   wallHeightScale,
   stairs,
   label,
@@ -375,7 +381,8 @@ export function FloorMesh({
     });
     return {
       slab: buildSlabGeometry(floor, stairGeometry.holes),
-      walls: buildWallGeometry(floor, wallHeightScale),
+      // Phần nặng nhất (tầng nghìn tường) — nhớ theo tầng + tỉ lệ để đổi tầng cắt / 2D ↔ 3D tức thì.
+      walls: cachedWallGeometry(floor, wallHeightScale),
       rooms: floor.rooms.map((room) => ({ room, geometry: flatPolygon(room.polygon, 0.02) })),
       elevators: floor.connectors
         .filter((c) => c.type === 'elevator')
@@ -552,6 +559,9 @@ export function FloorMesh({
           <meshStandardMaterial color={theme.door} />
         </mesh>
       )}
+      {!ghost && floor.landmarks && floor.landmarks.length > 0 && (
+        <LandmarkModels landmarks={floor.landmarks} highlightId={highlightLandmarkId} />
+      )}
       {editing?.outlines?.map((o, i) =>
         o.points.length >= 2 ? (
           <Line
@@ -723,29 +733,215 @@ export function Route3D({
     <group>
       {legs.map(({ segment, points }, i) =>
         points.length >= 2 ? (
-          <Line key={`${segment.floorId}:${i}`} points={points} color={theme.route} lineWidth={6} />
+          <RouteRibbon key={`${segment.floorId}:${i}`} points={points} theme={theme} />
         ) : null,
       )}
       {changes.map((change, i) => (
         <FloorChange3D key={i} change={change} theme={theme} />
       ))}
-      <mesh position={start}>
-        <sphereGeometry args={[0.3, 20, 12]} />
-        <meshStandardMaterial color={theme.route} />
-      </mesh>
+      {/* Điểm xuất phát: đĩa tròn viền trắng nằm trên dải tuyến. */}
+      <group position={start}>
+        <mesh position={[0, 0.03, 0]}>
+          <cylinderGeometry args={[0.5, 0.5, 0.06, 32]} />
+          <meshStandardMaterial color={theme.routeCasing} />
+        </mesh>
+        <mesh position={[0, 0.07, 0]}>
+          <cylinderGeometry args={[0.36, 0.36, 0.06, 32]} />
+          <meshStandardMaterial color={theme.route} />
+        </mesh>
+      </group>
+      {/* Điểm đến: ghim đỏ đứng trên vòng tròn đánh dấu mặt sàn. */}
       <group position={end}>
+        <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0.45, 0.75, 40]} />
+          <meshBasicMaterial
+            color={theme.destination}
+            transparent
+            opacity={0.55}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+        <mesh position={[0, 0.03, 0]}>
+          <cylinderGeometry args={[0.18, 0.18, 0.04, 20]} />
+          <meshStandardMaterial color={theme.destination} />
+        </mesh>
         <mesh position={[0, 0.9, 0]} rotation={[Math.PI, 0, 0]}>
-          <coneGeometry args={[0.35, 1, 20]} />
+          <coneGeometry args={[0.35, 1, 24]} />
           <meshStandardMaterial color={theme.destination} />
         </mesh>
         <mesh position={[0, 1.55, 0]}>
-          <sphereGeometry args={[0.45, 24, 16]} />
+          <sphereGeometry args={[0.45, 32, 20]} />
           <meshStandardMaterial color={theme.destination} />
+        </mesh>
+        <mesh position={[0, 1.55, 0.36]}>
+          <sphereGeometry args={[0.16, 16, 12]} />
+          <meshStandardMaterial color="#ffffff" />
         </mesh>
         {destinationLabel && (
           <TextLabel position={[0, 2.1, 0]} text={destinationLabel} color={theme.destination} />
         )}
       </group>
+    </group>
+  );
+}
+
+/**
+ * Vị trí người dùng: đĩa toả sáng trên sàn, chấm tròn viền trắng và quạt chỉ hướng nhìn (nếu có).
+ * `position` là điểm trên mặt sàn.
+ */
+export function LocationMarker3D({
+  position,
+  heading,
+  theme,
+}: {
+  position: Vec3;
+  /** Hướng nhìn (độ, 0 = trục +x, theo chiều kim đồng hồ trên mặt bằng). */
+  heading?: number;
+  theme: MapTheme;
+}) {
+  return (
+    <group position={position}>
+      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[1.1, 40]} />
+        <meshBasicMaterial color={theme.location} transparent opacity={0.18} depthWrite={false} />
+      </mesh>
+      {heading !== undefined && (
+        // Quạt hướng nhìn: hình quạt mờ phía trước (trục +x của mặt bằng xoay theo `heading`).
+        <mesh position={[0, 0.03, 0]} rotation={[0, -THREE.MathUtils.degToRad(heading), 0]}>
+          <cylinderGeometry args={[1.6, 1.6, 0.01, 24, 1, false, Math.PI / 2 - 0.45, 0.9]} />
+          <meshBasicMaterial color={theme.location} transparent opacity={0.28} depthWrite={false} />
+        </mesh>
+      )}
+      <mesh position={[0, 0.35, 0]}>
+        <sphereGeometry args={[0.42, 32, 20]} />
+        <meshStandardMaterial color="#ffffff" />
+      </mesh>
+      <mesh position={[0, 0.35, 0]}>
+        <sphereGeometry args={[0.32, 32, 20]} />
+        <meshStandardMaterial
+          color={theme.location}
+          emissive={theme.location}
+          emissiveIntensity={0.3}
+        />
+      </mesh>
+      <TextLabel position={[0, 1.0, 0]} text="Bạn ở đây" color={theme.location} />
+    </group>
+  );
+}
+
+/** Bề rộng dải tuyến đường 3D (m): lõi màu tuyến và viền ngoài. */
+const ROUTE_WIDTH = 0.55;
+const ROUTE_CASING = 0.85;
+/** Bán kính bo góc tuyến (m). */
+const ROUTE_CORNER = 0.9;
+/** Khoảng cách giữa các mũi tên chỉ chiều đi trên tuyến (m). */
+const ROUTE_ARROW_STEP = 2.2;
+
+/**
+ * Tuyến đường 3D dạng dải phẳng liền mạch (không dùng nét Line — nét dày của three.js bị khuyết ở
+ * góc): góc gãy bo tròn, viền ngoài tương phản, mũi tên chỉ chiều đi dọc tuyến. Đi được cả trên vế
+ * thang nghiêng (cao độ theo từng đỉnh).
+ */
+function RouteRibbon({ points, theme }: { points: readonly Vec3[]; theme: MapTheme }) {
+  const geometry = useMemo(() => {
+    const smooth = roundCorners(points, ROUTE_CORNER);
+    const plan = smooth.map(([x, , z]) => ({ x, y: z }));
+    const heights = smooth.map(([, y]) => y);
+    const make = (pos: number[]) => {
+      if (pos.length === 0) return null;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.computeVertexNormals();
+      return g;
+    };
+    const round = { roundStart: true, roundEnd: true };
+    const casing = make(
+      strokeTriangles(
+        plan,
+        ROUTE_CASING,
+        heights.map((h) => h - 0.01),
+        round,
+      ),
+    );
+    const core = make(strokeTriangles(plan, ROUTE_WIDTH, heights, round));
+    // Mũi tên chữ V dọc tuyến, nằm trên mặt dải.
+    const arrows: number[] = [];
+    let carry = ROUTE_ARROW_STEP / 2;
+    for (let i = 0; i + 1 < smooth.length; i++) {
+      const a = smooth[i]!;
+      const b = smooth[i + 1]!;
+      const dx = b[0] - a[0];
+      const dz = b[2] - a[2];
+      const len = Math.hypot(dx, dz);
+      if (len < 1e-4) continue;
+      const ux = dx / len;
+      const uz = dz / len;
+      for (let d = carry; d < len; d += ROUTE_ARROW_STEP) {
+        const t = d / len;
+        const c = { x: a[0] + dx * t, y: a[2] + dz * t };
+        const h = a[1] + (b[1] - a[1]) * t + 0.012;
+        const s = ROUTE_WIDTH * 0.32;
+        const tip = { x: c.x + ux * s, y: c.y + uz * s };
+        const back = (side: number) => ({
+          x: c.x - ux * s * 0.6 - uz * s * side,
+          y: c.y - uz * s * 0.6 + ux * s * side,
+        });
+        arrows.push(
+          ...strokeTriangles([back(1), tip, back(-1)], ROUTE_WIDTH * 0.16, h, {
+            roundStart: true,
+            roundEnd: true,
+          }),
+        );
+      }
+      carry = (((carry - len) % ROUTE_ARROW_STEP) + ROUTE_ARROW_STEP) % ROUTE_ARROW_STEP;
+    }
+    return { casing, core, arrows: make(arrows) };
+  }, [points]);
+  useEffect(
+    () => () => {
+      geometry.casing?.dispose();
+      geometry.core?.dispose();
+      geometry.arrows?.dispose();
+    },
+    [geometry],
+  );
+  return (
+    <group renderOrder={5}>
+      {geometry.casing && (
+        <mesh geometry={geometry.casing} renderOrder={5}>
+          <meshBasicMaterial
+            color={theme.routeCasing}
+            side={THREE.DoubleSide}
+            polygonOffset
+            polygonOffsetFactor={-2}
+            polygonOffsetUnits={-2}
+          />
+        </mesh>
+      )}
+      {geometry.core && (
+        <mesh geometry={geometry.core} renderOrder={6}>
+          <meshStandardMaterial
+            color={theme.route}
+            emissive={theme.route}
+            emissiveIntensity={0.35}
+            side={THREE.DoubleSide}
+            polygonOffset
+            polygonOffsetFactor={-4}
+            polygonOffsetUnits={-4}
+          />
+        </mesh>
+      )}
+      {geometry.arrows && (
+        <mesh geometry={geometry.arrows} renderOrder={7}>
+          <meshBasicMaterial
+            color={theme.routeCasing}
+            side={THREE.DoubleSide}
+            polygonOffset
+            polygonOffsetFactor={-6}
+            polygonOffsetUnits={-6}
+          />
+        </mesh>
+      )}
     </group>
   );
 }

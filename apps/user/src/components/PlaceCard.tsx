@@ -42,7 +42,10 @@ export function PlaceCard({
     title = place.room.name;
     detail = [place.room.code, floor.name, department?.name];
     icon = (
-      <span className="dot place-dot" style={{ background: department?.color ?? '#94a3b8' }} />
+      <span
+        className="dot place-dot"
+        style={{ background: department?.color ?? 'var(--color-gray-400)' }}
+      />
     );
     note = place.room.destination ? undefined : 'Tuyến sẽ dẫn tới giữa phòng.';
   } else {

@@ -1,0 +1,17 @@
+{
+  "name": "@hwn/theme",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bộ màu thương hiệu HWN (CSS variables + hằng số TS cho canvas/WebGL) dùng chung cho mọi app",
+  "type": "module",
+  "sideEffects": [
+    "*.css"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./tokens.css": "./src/tokens.css"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  }
+}

@@ -36,7 +36,7 @@
 .btn-primary {
   background: var(--color-primary);
   border-color: var(--color-primary);
-  color: #fff;
+  color: var(--color-white);
 }
 
 .btn-danger {
@@ -46,7 +46,7 @@
 .btn-active {
   background: var(--color-primary);
   border-color: var(--color-primary);
-  color: #fff;
+  color: var(--color-white);
 }
 
 .btn-row {
@@ -60,7 +60,7 @@
 }
 
 .warn {
-  color: var(--color-warning);
+  color: var(--color-warning-text);
   margin: 0;
 }
 
@@ -147,7 +147,7 @@
 }
 
 .save-state.dirty {
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 
 .editor-alert {
@@ -260,7 +260,7 @@
 
 .editor-toolbar button.active {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-white);
 }
 
 /* Nút có menu con (kiểu cửa, loại tường, loại thang máy): tam giác nhỏ ở góc dưới phải. */
@@ -324,7 +324,7 @@
 
 .tool-variant-menu button.active {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-white);
 }
 
 .tool-variant-menu-icon {
@@ -374,7 +374,7 @@
 .floor-tab.active {
   background: var(--color-primary);
   border-color: var(--color-primary);
-  color: #fff;
+  color: var(--color-white);
 }
 
 .floor-add {
@@ -586,7 +586,7 @@
 
 .chip-active {
   border-color: var(--color-primary);
-  color: var(--color-primary);
+  color: var(--color-link);
   font-weight: 600;
 }
 
@@ -629,7 +629,7 @@
 }
 
 .issue-warning strong {
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 
 /* ---- Thanh trạng thái -------------------------------------------- */
@@ -670,7 +670,7 @@
 }
 
 .editor-status-measure {
-  color: #2563eb;
+  color: var(--tone-blue-solid);
   font-weight: 600;
 }
 
@@ -718,7 +718,7 @@
 
 .editor-status-snaps button.on {
   background: color-mix(in srgb, var(--color-primary) 15%, transparent);
-  color: var(--color-primary);
+  color: var(--color-link);
   font-weight: 600;
 }
 
@@ -906,7 +906,7 @@
 .warn-list {
   margin: 0;
   padding-left: 18px;
-  color: var(--color-warning);
+  color: var(--color-warning-text);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1062,6 +1062,17 @@
   max-width: 360px;
 }
 
+/* Trang Khuôn viên: chọn cơ sở ngay trên đầu trang. */
+.campus-select {
+  max-width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .site-hint-bar,
 .layer-hint {
   position: absolute;
@@ -1104,7 +1115,7 @@
 
 .site-hint-bar .site-note {
   flex-basis: 100%;
-  color: var(--color-warning);
+  color: var(--color-warning-text);
   font-weight: 600;
 }
 
@@ -1163,7 +1174,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  border: 2px solid #ffffff;
+  border: 2px solid var(--color-white);
   box-shadow: 0 0 0 1px var(--color-border);
 }
 
@@ -1191,7 +1202,7 @@
 
 .layer-switch button.active {
   background: var(--color-primary);
-  color: #ffffff;
+  color: var(--color-white);
   font-weight: 600;
 }
 

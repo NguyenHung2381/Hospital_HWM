@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { campusViewSite, externalMapUrl, type SitePoi } from '@hwn/map-core';
@@ -40,6 +40,8 @@ export function CampusPage() {
   const poi = picked ?? fromParam ?? null;
 
   const campus = map.data?.campus;
+  // Giữ nguyên object giữa các lần vẽ: Campus3D dựng lại toàn bộ phần ngoài trời khi `site` đổi.
+  const site = useMemo(() => campus && campusViewSite(campus), [campus]);
   const [mode, setMode] = useState<'2d' | '3d'>('2d');
   // Dữ liệu đầy đủ các toà cho chế độ 3D (cùng cache với các trang khác).
   const fulls = useQueries({
@@ -118,10 +120,11 @@ export function CampusPage() {
                       ]
                     : [];
                 })}
-                site={campusViewSite(campus)}
+                site={site}
                 departments={map.data.departments}
                 level={map.data.level}
                 focusBuildingId={building.data?.id}
+                highlightPoiId={poi?.id}
                 onBuildingClick={(id) => {
                   setBuildingId(id);
                   navigate('/');

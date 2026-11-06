@@ -1,3 +1,5 @@
+import { palette } from '@hwn/theme';
+
 /** Bảng màu dùng chung cho 2D và 3D. Canvas/WebGL không đọc được CSS variables nên phải truyền giá trị cụ thể. */
 export interface MapTheme {
   background: string;
@@ -22,54 +24,61 @@ export interface MapTheme {
   /** Tường trong chế độ 3D. */
   wall3d: string;
   glass: string;
+  /**
+   * Màu nét của ảnh mặt bằng làm nền (bản vẽ scan / PDF): giấy trắng thành trong suốt, nét đen tô
+   * màu này — nhạt, khác màu tường để phân biệt phần đã vẽ với bản vẽ gốc.
+   */
+  planInk: string;
 }
 
 export const lightMapTheme: MapTheme = {
-  background: '#f8fafc',
-  floor: '#ffffff',
-  wall: '#334155',
+  background: palette.gray50,
+  floor: palette.white,
+  wall: palette.gray700,
   window: '#7dd3fc',
-  door: '#94a3b8',
-  entrance: '#16a34a',
-  roomFill: '#e2e8f0',
-  roomStroke: '#cbd5e1',
-  roomLabel: '#0f172a',
-  roomHighlight: '#f97316',
+  door: palette.gray400,
+  entrance: palette.primary,
+  roomFill: palette.gray200,
+  roomStroke: palette.gray300,
+  roomLabel: palette.gray900,
+  roomHighlight: palette.accent,
   connectorFill: '#ede9fe',
-  connectorStroke: '#7c3aed',
+  connectorStroke: palette.purpleSolid,
   navEdge: '#a855f7',
   navNode: '#7e22ce',
-  route: '#0f766e',
-  routeCasing: '#ffffff',
-  location: '#2563eb',
-  destination: '#dc2626',
-  labelHalo: '#ffffff',
-  wall3d: '#e2e8f0',
+  route: palette.primary,
+  routeCasing: palette.white,
+  location: palette.blueSolid,
+  destination: palette.error,
+  labelHalo: palette.white,
+  wall3d: palette.gray200,
   glass: '#7dd3fc',
+  planInk: '#c2410c',
 };
 
 export const darkMapTheme: MapTheme = {
-  background: '#0b1120',
-  floor: '#111827',
-  wall: '#cbd5e1',
+  background: palette.gray900,
+  floor: palette.gray800,
+  wall: palette.gray300,
   window: '#38bdf8',
-  door: '#64748b',
-  entrance: '#4ade80',
-  roomFill: '#1e293b',
-  roomStroke: '#334155',
-  roomLabel: '#e2e8f0',
-  roomHighlight: '#fb923c',
+  door: palette.gray500,
+  entrance: palette.primaryLight,
+  roomFill: palette.gray700,
+  roomStroke: palette.gray600,
+  roomLabel: palette.gray100,
+  roomHighlight: palette.accentLight,
   connectorFill: '#2e1065',
   connectorStroke: '#a78bfa',
   navEdge: '#c084fc',
   navNode: '#e9d5ff',
-  route: '#2dd4bf',
-  routeCasing: '#042f2e',
-  location: '#60a5fa',
-  destination: '#f87171',
-  labelHalo: '#0b1120',
-  wall3d: '#475569',
+  route: palette.primaryLight,
+  routeCasing: palette.gray900,
+  location: palette.secondary,
+  destination: palette.error,
+  labelHalo: palette.gray900,
+  wall3d: palette.gray600,
   glass: '#38bdf8',
+  planInk: '#60a5fa',
 };
 
 /** Thêm độ trong suốt vào màu hex `#rrggbb`. */

@@ -115,6 +115,7 @@ import {
   type LobbyHandle,
   type SiteRef,
 } from './siteOps';
+import { palette } from '@hwn/theme';
 
 const GRID = 1;
 /** Lưới bắt dính khi vẽ sảnh / dốc trong toà (m). */
@@ -1081,8 +1082,8 @@ export type SiteEditor = ReturnType<typeof useSiteEditor>;
 /* ------------------------------------------------------------------ */
 
 /** Ảnh nền mặt bằng tổng thể (toạ độ mặt bằng). */
-export function SiteBackground({ campus }: { campus: Campus }) {
-  return campus.background ? <BackgroundImage background={campus.background} /> : null;
+export function SiteBackground({ campus, ink }: { campus: Campus; ink: string }) {
+  return campus.background ? <BackgroundImage background={campus.background} ink={ink} /> : null;
 }
 
 /**
@@ -1183,7 +1184,7 @@ export function SiteEditorOverlay({ ed, theme }: { ed: SiteEditor; theme: MapThe
                   d.position.x + d.outward.x * px(22),
                   d.position.y + d.outward.y * px(22),
                 ]}
-                stroke="#16a34a"
+                stroke={palette.success}
                 strokeWidth={2}
                 strokeScaleEnabled={false}
                 dash={[px(4), px(3)]}
@@ -1192,7 +1193,7 @@ export function SiteEditorOverlay({ ed, theme }: { ed: SiteEditor; theme: MapThe
                 x={d.position.x}
                 y={d.position.y}
                 radius={px(hot ? 8 : d.entrance ? 6 : 4.5)}
-                fill={hot ? ACCENT : '#16a34a'}
+                fill={hot ? ACCENT : palette.success}
                 stroke="#ffffff"
                 strokeWidth={1.5}
                 strokeScaleEnabled={false}
@@ -1202,7 +1203,7 @@ export function SiteEditorOverlay({ ed, theme }: { ed: SiteEditor; theme: MapThe
         })}
       {shownSockets.map((x) => {
         const road = x.kind === 'road';
-        const color = x.linked ? '#16a34a' : road ? '#ea580c' : '#d97706';
+        const color = x.linked ? palette.success : road ? '#ea580c' : palette.warning;
         const r = px(road ? 7 : 5);
         const tip = {
           x: x.position.x + x.dir.x * px(26),
@@ -1403,7 +1404,7 @@ export function SiteEditorOverlay({ ed, theme }: { ed: SiteEditor; theme: MapThe
               x={d.site.x}
               y={d.site.y}
               radius={px(first ? 8 : 5)}
-              fill={first ? ACCENT : '#8b5cf6'}
+              fill={first ? ACCENT : palette.purpleSolid}
               stroke="#ffffff"
               strokeWidth={1.5}
               strokeScaleEnabled={false}
@@ -1769,7 +1770,11 @@ function SocketList({ ed, sockets }: { ed: SiteEditor; sockets: readonly CampusS
             <span
               className="socket-dot"
               style={{
-                background: x.linked ? '#16a34a' : x.kind === 'road' ? '#ea580c' : '#d97706',
+                background: x.linked
+                  ? palette.success
+                  : x.kind === 'road'
+                    ? '#ea580c'
+                    : palette.warning,
               }}
               aria-hidden
             />

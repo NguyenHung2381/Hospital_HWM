@@ -14,7 +14,7 @@ import {
   type Room,
   type Route,
 } from '@hwn/map-core';
-import { useMapTheme, type ThemeSetting } from '../core/hooks';
+import { useMapTheme, useStableCallback, type ThemeSetting } from '../core/hooks';
 import { routeSegmentsOnFloor } from '../core/route';
 import { floorBounds, mergeBounds } from '../core/viewport';
 import {
@@ -193,6 +193,101 @@ export function FloorPlan2D({
     return { minX: b.minX - padX, minY: b.minY - padY, maxX: b.maxX + padX, maxY: b.maxY + padY };
   }, [activeStep, floor.id]);
 
+  /*
+   * Các lớp tĩnh (khuôn viên, phòng, tường, nhãn, ghim…) được ghi nhớ: đổi bước chỉ đường, vị trí
+   * chạy dọc tuyến… chỉ vẽ lại lớp tuyến đường, không vẽ lại hàng nghìn hình của mặt bằng.
+   * Callback được giữ tham chiếu cố định để trang gọi có thể viết thẳng trong JSX.
+   */
+  const roomClick = useStableCallback(onRoomClick);
+  const landmarkClick = useStableCallback(onLandmarkClick);
+  const hiddenRoomId = route?.to.roomId;
+
+  const campusLayer = useMemo(
+    () =>
+      campus && (
+        <Layer listening={false}>
+          <CampusUnderlay context={campus} floorLevel={floor.level} theme={theme} />
+        </Layer>
+      ),
+    [campus, floor.level, theme],
+  );
+  const siteLayer = useMemo(
+    () =>
+      ownSite && (
+        <Layer listening={false}>
+          <SiteGround site={ownSite} theme={theme} obstacles={obstacles} />
+        </Layer>
+      ),
+    [ownSite, theme, obstacles],
+  );
+  const planLayer = useMemo(
+    () => (
+      <Layer>
+        <FloorSlab bounds={bounds} theme={theme} />
+        <Rooms
+          rooms={floor.rooms}
+          departments={departments}
+          theme={theme}
+          highlightRoomId={highlightRoomId}
+          onRoomClick={roomClick}
+        />
+        <Connectors connectors={floor.connectors} theme={theme} />
+        {floor.furniture && floor.furniture.length > 0 && (
+          <FurnitureLayer furniture={floor.furniture} theme={theme} />
+        )}
+        <Walls floor={floor} theme={theme} />
+      </Layer>
+    ),
+    [bounds, floor, departments, theme, highlightRoomId, roomClick],
+  );
+  const labelLayer = useMemo(
+    () => (
+      <Layer listening={false}>
+        {showNavGraph && <NavGraph floor={floor} theme={theme} />}
+        {showLabels && <Labels floor={floor} theme={theme} />}
+      </Layer>
+    ),
+    [floor, theme, showNavGraph, showLabels],
+  );
+  const pinLayer = useMemo(
+    () => (
+      <Layer>
+        {showRoomPins && (
+          <RoomPins
+            rooms={floor.rooms}
+            departments={departments}
+            theme={theme}
+            highlightRoomId={highlightRoomId}
+            // Có tuyến tới phòng này thì dấu điểm đến của tuyến đã đánh dấu chỗ đó.
+            hiddenRoomId={hiddenRoomId}
+            onRoomClick={roomClick}
+          />
+        )}
+        {floor.landmarks && floor.landmarks.length > 0 && (
+          <Landmarks
+            landmarks={floor.landmarks}
+            theme={theme}
+            highlightId={highlightLandmarkId}
+            showLabels={showLabels}
+            onLandmarkClick={landmarkClick}
+          />
+        )}
+      </Layer>
+    ),
+    [
+      floor,
+      departments,
+      theme,
+      showRoomPins,
+      showLabels,
+      highlightRoomId,
+      highlightLandmarkId,
+      hiddenRoomId,
+      roomClick,
+      landmarkClick,
+    ],
+  );
+
   return (
     <MapStage
       ref={ref}
@@ -207,58 +302,12 @@ export function FloorPlan2D({
       className={className}
       style={style}
     >
-      {campus && (
-        <Layer listening={false}>
-          <CampusUnderlay context={campus} floorLevel={floor.level} theme={theme} />
-        </Layer>
-      )}
-      {ownSite && (
-        <Layer listening={false}>
-          <SiteGround site={ownSite} theme={theme} obstacles={obstacles} />
-        </Layer>
-      )}
-      <Layer>
-        <FloorSlab bounds={bounds} theme={theme} />
-        <Rooms
-          rooms={floor.rooms}
-          departments={departments}
-          theme={theme}
-          highlightRoomId={highlightRoomId}
-          onRoomClick={onRoomClick}
-        />
-        <Connectors connectors={floor.connectors} theme={theme} />
-        {floor.furniture && floor.furniture.length > 0 && (
-          <FurnitureLayer furniture={floor.furniture} theme={theme} />
-        )}
-        <Walls floor={floor} theme={theme} />
-      </Layer>
-      <Layer listening={false}>
-        {showNavGraph && <NavGraph floor={floor} theme={theme} />}
-        {showLabels && <Labels floor={floor} theme={theme} />}
-      </Layer>
+      {campusLayer}
+      {siteLayer}
+      {planLayer}
+      {labelLayer}
       {/* Ghim & mốc nằm trên nhãn, dưới tuyến đường; chạm được. */}
-      <Layer>
-        {showRoomPins && (
-          <RoomPins
-            rooms={floor.rooms}
-            departments={departments}
-            theme={theme}
-            highlightRoomId={highlightRoomId}
-            // Có tuyến tới phòng này thì dấu điểm đến của tuyến đã đánh dấu chỗ đó.
-            hiddenRoomId={route?.to.roomId}
-            onRoomClick={onRoomClick}
-          />
-        )}
-        {floor.landmarks && floor.landmarks.length > 0 && (
-          <Landmarks
-            landmarks={floor.landmarks}
-            theme={theme}
-            highlightId={highlightLandmarkId}
-            showLabels={showLabels}
-            onLandmarkClick={onLandmarkClick}
-          />
-        )}
-      </Layer>
+      {pinLayer}
       <Layer listening={false}>
         {segments.length > 0 && (
           <RouteLayer

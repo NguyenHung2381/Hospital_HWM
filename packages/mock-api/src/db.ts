@@ -9,9 +9,14 @@ import {
   type Point,
 } from '@hwn/map-core';
 import {
+  createLanPlanBuildings,
+  createLanPlanCampus,
   createSampleAnnex,
   createSampleBuilding,
   createSampleCampus,
+  SAMPLE_ANNEX_ID,
+  SAMPLE_BUILDING_ID,
+  SAMPLE_CAMPUS_ID,
   sampleDepartments,
 } from '@hwn/map-core/sample';
 
@@ -32,8 +37,23 @@ const STORAGE_KEY = 'hwn-mock-db-v1';
  * · 10: làn đón trả khách sát vỉa hè, sảnh rộng hơn
  * · 11: sảnh, làn đón, dốc chuyển thành phần ngoài trời của toà (`Building.exterior`)
  * · 12: sảnh + dốc gộp thành một đối tượng (`exterior.lobbies`), có bậc / dốc ở các cạnh.
+ * · 13: cơ sở + các toà theo bộ bản vẽ LAN của bệnh viện (tầng có ảnh nền mặt bằng, chưa có phòng).
+ * · 14: tường, cột, cửa trích từ bản vẽ LAN cho các tầng đó (tầng chưa vẽ gì).
+ * · 15: trích lại (thêm tường bị sót, vách nét đơn, thang bộ / cuốn / máy, dốc) cho toà LAN chưa lưu.
+ * · 16, 17: thang trong sân trong nhà chính LAN thành bậc từ sân lên tầng 1 (`exterior`), toà chưa
+ *   lưu (17: chênh cao bậc theo mặc định, khớp bệ toà).
+ * · 18: phần ngoài trời của cơ sở LAN theo sơ đồ tổng thể (nhà cầu, khu bể nước) khi còn trống.
+ * · 19: chạy lại 13, 17, 18 cho dữ liệu đã đánh dấu 18 khi code còn đang sửa: thêm toà / cơ sở LAN
+ *   còn thiếu, toà chưa lưu nhận bản trích mới nhất, ngoài trời LAN bổ sung khu vực / đường còn
+ *   thiếu theo ID (giữ phần đã vẽ thêm).
+ * · 20: bỏ cơ sở mẫu "Cơ sở chính" và hai toà mẫu — chỉ còn bệnh viện thật theo bản vẽ LAN.
+ * · 21: trích lại toà LAN chưa lưu: tường nối qua cửa sổ, thang bộ bị sót, bỏ hộp kỹ thuật nhận
+ *   nhầm thành thang máy, bậc tam cấp / dốc lối vào thành phần ngoài trời của toà.
  */
-const SEED_VERSION = 12;
+const SEED_VERSION = 21;
+
+/** Cơ sở / toà dữ liệu mẫu (chỉ còn dùng trong test — `resetMockDb({ sample: true })`). */
+const SAMPLE_BUILDING_IDS: Id[] = [SAMPLE_BUILDING_ID, SAMPLE_ANNEX_ID];
 
 /**
  * Phần ngoài trời vẫn là bản mẫu (mọi khu vực / đường / cổng đều mang ID `site_…` của dữ liệu mẫu —
@@ -50,13 +70,20 @@ interface DbState {
   seed?: number;
 }
 
-function initialState(): DbState {
-  const main = createSampleBuilding();
-  const annex = createSampleAnnex();
-  const campus = createSampleCampus();
+/** @param sample thêm cơ sở + hai toà mẫu (test của mock API dựa trên chúng). */
+function initialState(sample = false): DbState {
+  const plans = createLanPlanCampus();
+  const buildings = createLanPlanBuildings();
+  const campuses: Record<Id, Campus> = {};
+  if (sample) {
+    buildings.unshift(createSampleBuilding(), createSampleAnnex());
+    const campus = createSampleCampus();
+    campuses[campus.id] = campus;
+  }
+  campuses[plans.id] = plans;
   return {
-    buildings: { [main.id]: main, [annex.id]: annex },
-    campuses: { [campus.id]: campus },
+    buildings: Object.fromEntries(buildings.map((b) => [b.id, b])),
+    campuses,
     departments: structuredClone(sampleDepartments),
     seed: SEED_VERSION,
   };
@@ -144,6 +171,88 @@ function upgrade(state: DbState): DbState {
     }
     next.buildings = buildings;
   }
+  if (seed < 13 || seed === 18) {
+    // Toà / cơ sở theo bản vẽ LAN: chỉ thêm khi chưa có (giữ bản đã sửa).
+    const plans = createLanPlanCampus();
+    const buildings = { ...next.buildings };
+    for (const b of createLanPlanBuildings()) buildings[b.id] ??= b;
+    next.buildings = buildings;
+    if (!next.campuses?.[plans.id]) next.campuses = { ...next.campuses, [plans.id]: plans };
+  }
+  if (seed < 14) {
+    // Tầng theo bản vẽ LAN còn trống (chưa vẽ gì) thì nhận tường / cột / cửa trích từ bản vẽ.
+    const buildings = { ...next.buildings };
+    for (const fresh of createLanPlanBuildings()) {
+      const b = buildings[fresh.id];
+      if (!b) continue;
+      const floors = b.floors.map((f) => {
+        const src = fresh.floors.find((x) => x.id === f.id);
+        const empty = !f.walls.length && !f.rooms.length && !f.openings.length;
+        return src && empty ? { ...f, walls: src.walls, openings: src.openings } : f;
+      });
+      buildings[b.id] = { ...b, floors };
+    }
+    next.buildings = buildings;
+  }
+  if (seed < 21) {
+    // Toà theo bản vẽ LAN chưa từng được lưu (version 1) thì thay bằng bản trích mới nhất.
+    const buildings = { ...next.buildings };
+    for (const fresh of createLanPlanBuildings()) {
+      const b = buildings[fresh.id];
+      if (b && b.version === 1) {
+        buildings[b.id] = {
+          ...b,
+          floors: fresh.floors,
+          ...(fresh.exterior ? { exterior: fresh.exterior } : {}),
+        };
+      }
+    }
+    next.buildings = buildings;
+  }
+  if (seed < 18) {
+    // Cơ sở LAN chưa vẽ gì ngoài trời thì nhận nhà cầu, khu bể nước theo sơ đồ tổng thể.
+    const plans = createLanPlanCampus();
+    const c = next.campuses?.[plans.id];
+    const empty = (s?: Campus['site']) =>
+      !s || (!s.areas.length && !s.paths.length && !s.gates.length && !s.pois.length);
+    if (c && empty(c.site))
+      next.campuses = { ...next.campuses, [c.id]: { ...c, site: plans.site } };
+  }
+  if (seed === 18) {
+    const plans = createLanPlanCampus();
+    const c = next.campuses?.[plans.id];
+    if (c && plans.site) {
+      const site = c.site ?? { areas: [], paths: [], gates: [], pois: [] };
+      const missing = <T extends { id: Id }>(have: T[], want: T[]) =>
+        want.filter((w) => !have.some((h) => h.id === w.id));
+      next.campuses = {
+        ...next.campuses,
+        [c.id]: {
+          ...c,
+          site: {
+            ...site,
+            areas: [...site.areas, ...missing(site.areas, plans.site.areas)],
+            paths: [...site.paths, ...missing(site.paths, plans.site.paths)],
+          },
+        },
+      };
+    }
+  }
+  if (seed < 20) {
+    // Bỏ dữ liệu mẫu. Toà người dùng tự thêm vào cơ sở mẫu thì giữ (cơ sở mẫu còn lại chỉ với các
+    // toà đó); cơ sở mẫu không còn toà nào thì xoá hẳn.
+    const buildings = { ...next.buildings };
+    for (const id of SAMPLE_BUILDING_IDS) delete buildings[id];
+    next.buildings = buildings;
+    const campuses = { ...next.campuses };
+    for (const c of Object.values(campuses)) {
+      const kept = c.buildings.filter((pl) => !SAMPLE_BUILDING_IDS.includes(pl.buildingId));
+      if (kept.length !== c.buildings.length) campuses[c.id] = { ...c, buildings: kept };
+    }
+    const sample = campuses[SAMPLE_CAMPUS_ID];
+    if (sample && !sample.buildings.length) delete campuses[SAMPLE_CAMPUS_ID];
+    next.campuses = campuses;
+  }
   return { ...next, seed: SEED_VERSION };
 }
 
@@ -230,8 +339,11 @@ function bump(doc: { version: number; updatedAt: string }) {
   doc.updatedAt = new Date().toISOString();
 }
 
-/** Khôi phục dữ liệu mẫu ban đầu (gọi từ console: `window.__hwnMock.reset()`). */
-export function resetMockDb() {
-  state = linkDepartments(initialState());
+/**
+ * Khôi phục dữ liệu ban đầu (gọi từ console: `window.__hwnMock.reset()`).
+ * @param opts.sample kèm cơ sở + toà mẫu (cho test).
+ */
+export function resetMockDb(opts: { sample?: boolean } = {}) {
+  state = linkDepartments(initialState(opts.sample));
   persist();
 }

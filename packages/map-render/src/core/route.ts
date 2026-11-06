@@ -242,7 +242,8 @@ export function routeStepGeometry(route: Route): RouteStepGeometry[] {
       }
       case 'take-elevator':
       case 'take-stairs':
-      case 'take-escalator': {
+      case 'take-escalator':
+      case 'take-ramp': {
         const step = make(ins.type, seg, s.end, s.end - APPROACH_M, s.end, s.end);
         if (seg < track.length - 1) {
           seg++;

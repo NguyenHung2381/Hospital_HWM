@@ -404,3 +404,9 @@ export const createSampleBuilding = (): Building => structuredClone(sampleBuildi
 
 export { createSampleAnnex, SAMPLE_ANNEX_ID } from './annex';
 export { createSampleCampus, createSampleSitePlan, SAMPLE_CAMPUS_ID } from './campus';
+export {
+  createLanPlanBuildings,
+  createLanPlanCampus,
+  LAN_CAMPUS_ID,
+  PLAN_IMAGE_BASE,
+} from './lanPlans';

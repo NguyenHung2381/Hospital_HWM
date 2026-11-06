@@ -26,6 +26,7 @@ const STEP_ICON: Partial<Record<CampusStepType, IconName>> = {
   'take-elevator': 'elevator',
   'take-stairs': 'stairs',
   'take-escalator': 'escalator',
+  'take-ramp': 'ramp',
   'enter-room': 'door',
   'exit-building': 'door',
   'enter-building': 'door',

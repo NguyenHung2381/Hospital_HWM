@@ -2,16 +2,24 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { setupServer } from 'msw/node';
 import { ApiError, createApiClient } from '@hwn/api-client';
 import { validateBuilding } from '@hwn/map-core';
-import { SAMPLE_ANNEX_ID, SAMPLE_BUILDING_ID, SAMPLE_CAMPUS_ID } from '@hwn/map-core/sample';
+import {
+  createLanPlanBuildings,
+  LAN_CAMPUS_ID,
+  SAMPLE_ANNEX_ID,
+  SAMPLE_BUILDING_ID,
+  SAMPLE_CAMPUS_ID,
+} from '@hwn/map-core/sample';
 import { createHandlers } from './handlers';
 import { resetMockDb } from './db';
 
 const BASE = 'http://localhost/api';
 const server = setupServer(...createHandlers(BASE));
 const api = createApiClient({ baseURL: BASE });
+/** Các toà theo bản vẽ LAN (cơ sở thứ hai của dữ liệu mẫu). */
+const planIds = createLanPlanBuildings().map((b) => b.id);
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
-beforeEach(() => resetMockDb());
+beforeEach(() => resetMockDb({ sample: true }));
 afterAll(() => server.close());
 
 describe('mock API + api-client', () => {
@@ -20,6 +28,7 @@ describe('mock API + api-client', () => {
     expect(list).toEqual([
       expect.objectContaining({ id: SAMPLE_BUILDING_ID, floorCount: 2 }),
       expect.objectContaining({ id: SAMPLE_ANNEX_ID, floorCount: 2 }),
+      ...planIds.map((id) => expect.objectContaining({ id, campusId: LAN_CAMPUS_ID })),
     ]);
     const building = await api.buildings.get(SAMPLE_BUILDING_ID);
     expect(building.floors).toHaveLength(2);
@@ -42,7 +51,7 @@ describe('mock API + api-client', () => {
     expect(created.floors).toHaveLength(1);
     expect(created.departments.length).toBeGreaterThan(0);
     const list = await api.buildings.list();
-    expect(list).toHaveLength(3);
+    expect(list).toHaveLength(3 + planIds.length);
     expect(list.find((b) => b.id === created.id)?.campusId).toBe(SAMPLE_CAMPUS_ID);
     // Toà mới được đặt bên phải các toà đã có (toà mẫu rộng 40 m).
     const campus = await api.campuses.get(SAMPLE_CAMPUS_ID);
@@ -56,6 +65,7 @@ describe('mock API + api-client', () => {
       ),
     ).toBe(false);
     await api.buildings.remove(SAMPLE_ANNEX_ID);
+    for (const id of planIds) await api.buildings.remove(id);
     await expect(api.buildings.remove(SAMPLE_BUILDING_ID)).rejects.toMatchObject({
       status: 409,
       code: 'LAST_BUILDING',
@@ -200,6 +210,7 @@ describe('mock API + api-client', () => {
         id: SAMPLE_CAMPUS_ID,
         buildingIds: [SAMPLE_BUILDING_ID, SAMPLE_ANNEX_ID],
       }),
+      expect.objectContaining({ id: LAN_CAMPUS_ID, buildingIds: planIds }),
     ]);
     const main = await api.campuses.get(SAMPLE_CAMPUS_ID);
     expect(main.buildingInfo.map((i) => i.footprint.length)).toEqual([4, 4]);

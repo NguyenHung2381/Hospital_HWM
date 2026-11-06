@@ -46,6 +46,7 @@ import {
   roadMarks,
   offsetPolyline,
   parkingBays,
+  pathElbows,
 } from './siteGeometry';
 
 export { gateShape } from './siteGeometry';
@@ -570,6 +571,45 @@ function StairFace({ path, detail, icons }: { path: SitePath; detail: boolean; i
   );
 }
 
+/**
+ * Nút tròn ở đầu đường nối khuỷu vào đỉnh của đường cùng loại (xem `pathElbows`): đầu đường cắt
+ * vuông để lộ khấc ở góc ngoài chỗ nối, nút tròn đường kính `width` lấp khấc đó như nét liền.
+ */
+function ElbowCaps({
+  path,
+  elbows,
+  width,
+  fill,
+  opacity,
+}: {
+  path: SitePath;
+  elbows: ReadonlyMap<Id, { start: boolean; end: boolean }>;
+  width: number;
+  fill: string;
+  opacity?: number;
+}) {
+  const e = elbows.get(path.id);
+  if (!e || path.points.length < 2) return null;
+  const ends = [e.start && path.points[0]!, e.end && path.points[path.points.length - 1]!];
+  return (
+    <>
+      {ends.map((at, i) =>
+        at ? (
+          <Circle
+            key={i}
+            x={at.x}
+            y={at.y}
+            radius={width / 2}
+            fill={fill}
+            opacity={opacity}
+            listening={false}
+          />
+        ) : null,
+      )}
+    </>
+  );
+}
+
 export interface SiteGroundProps {
   site: SitePlan;
   theme: MapTheme;
@@ -692,6 +732,8 @@ export function SiteGround({
     [site.paths],
   );
   const zebras = useMemo(() => crosswalks(site.paths), [site.paths]);
+  /** Đầu đường nối khuỷu vào đường cùng loại — bo tròn cho mặt đường liền khối. */
+  const elbows = useMemo(() => pathElbows(site.paths), [site.paths]);
   const gates = useMemo(
     () =>
       site.gates.map((g) => ({ gate: g, shape: gateShape(g, site.paths), style: gateStyleOf(g) })),
@@ -901,14 +943,21 @@ export function SiteGround({
        * đường) → vạch giữa. Đầu đường cắt vuông để khớp với mép đường bên ngoài / bãi xe.
        */}
       {drawnRoads.map((p) => (
-        <Line
-          key={`h:${p.id}`}
-          points={flattenPoints(p.points)}
-          stroke={p.id === selectedId ? SELECT : theme.labelHalo}
-          strokeWidth={p.width + 0.8}
-          lineCap="butt"
-          lineJoin="round"
-        />
+        <Fragment key={`h:${p.id}`}>
+          <Line
+            points={flattenPoints(p.points)}
+            stroke={p.id === selectedId ? SELECT : theme.labelHalo}
+            strokeWidth={p.width + 0.8}
+            lineCap="butt"
+            lineJoin="round"
+          />
+          <ElbowCaps
+            path={p}
+            elbows={elbows}
+            width={p.width + 0.8}
+            fill={p.id === selectedId ? SELECT : theme.labelHalo}
+          />
+        </Fragment>
       ))}
       {/* Viền dốc: gạch lát sẫm như mép lối đi (không dùng viền nền tối — lộ thành dải đen cạnh sân). */}
       {rampLines.map(({ ramp: p, line }) => (
@@ -953,14 +1002,16 @@ export function SiteGround({
         ))}
 
       {shared.map((p) => (
-        <Line
-          key={`sw:${p.id}`}
-          points={flattenPoints(p.points)}
-          stroke={PAVING}
-          strokeWidth={p.width}
-          lineCap="butt"
-          lineJoin="round"
-        />
+        <Fragment key={`sw:${p.id}`}>
+          <Line
+            points={flattenPoints(p.points)}
+            stroke={PAVING}
+            strokeWidth={p.width}
+            lineCap="butt"
+            lineJoin="round"
+          />
+          <ElbowCaps path={p} elbows={elbows} width={p.width} fill={PAVING} />
+        </Fragment>
       ))}
       {detail &&
         shared.map((p) => {
@@ -994,14 +1045,16 @@ export function SiteGround({
       ))}
 
       {shared.map((p) => (
-        <Line
-          key={`cb:${p.id}`}
-          points={flattenPoints(p.points)}
-          stroke={CURB}
-          strokeWidth={carriageway(p) + 0.35}
-          lineCap="butt"
-          lineJoin="round"
-        />
+        <Fragment key={`cb:${p.id}`}>
+          <Line
+            points={flattenPoints(p.points)}
+            stroke={CURB}
+            strokeWidth={carriageway(p) + 0.35}
+            lineCap="butt"
+            lineJoin="round"
+          />
+          <ElbowCaps path={p} elbows={elbows} width={carriageway(p) + 0.35} fill={CURB} />
+        </Fragment>
       ))}
 
       {/*
@@ -1032,14 +1085,16 @@ export function SiteGround({
       ))}
 
       {edgedRoads.map((p) => (
-        <Line
-          key={`e:${p.id}`}
-          points={flattenPoints(p.points)}
-          stroke={edgeColor(p)!}
-          strokeWidth={carriageway(p)}
-          lineCap="butt"
-          lineJoin="round"
-        />
+        <Fragment key={`e:${p.id}`}>
+          <Line
+            points={flattenPoints(p.points)}
+            stroke={edgeColor(p)!}
+            strokeWidth={carriageway(p)}
+            lineCap="butt"
+            lineJoin="round"
+          />
+          <ElbowCaps path={p} elbows={elbows} width={carriageway(p)} fill={edgeColor(p)!} />
+        </Fragment>
       ))}
       {edgedRoads.map((p) => {
         const w = Math.max(carriageway(p) - 0.6, carriageway(p) * 0.7);
@@ -1052,28 +1107,39 @@ export function SiteGround({
               lineCap="butt"
               lineJoin="round"
             />
+            <ElbowCaps path={p} elbows={elbows} width={w} fill={ASPHALT} />
             {/* Làn đón trả khách của một khu: cùng màu phủ với dốc để cả vòng liền một màu. */}
             {p.use && (
-              <Line
-                points={flattenPoints(p.points)}
-                stroke={withAlpha(rampStyle(p.use).color, 0.16)}
-                strokeWidth={w}
-                lineCap="butt"
-                lineJoin="round"
-              />
+              <>
+                <Line
+                  points={flattenPoints(p.points)}
+                  stroke={withAlpha(rampStyle(p.use).color, 0.16)}
+                  strokeWidth={w}
+                  lineCap="butt"
+                  lineJoin="round"
+                />
+                <ElbowCaps
+                  path={p}
+                  elbows={elbows}
+                  width={w}
+                  fill={withAlpha(rampStyle(p.use).color, 0.16)}
+                />
+              </>
             )}
           </Fragment>
         );
       })}
       {plainRoads.map((p) => (
-        <Line
-          key={`c:${p.id}`}
-          points={flattenPoints(p.points)}
-          stroke={ASPHALT}
-          strokeWidth={carriageway(p)}
-          lineCap="butt"
-          lineJoin="round"
-        />
+        <Fragment key={`c:${p.id}`}>
+          <Line
+            points={flattenPoints(p.points)}
+            stroke={ASPHALT}
+            strokeWidth={carriageway(p)}
+            lineCap="butt"
+            lineJoin="round"
+          />
+          <ElbowCaps path={p} elbows={elbows} width={carriageway(p)} fill={ASPHALT} />
+        </Fragment>
       ))}
       {roads.map(
         (p) =>

@@ -105,6 +105,7 @@ import {
   SnapMarker,
   WallPreview,
 } from './overlays';
+import { backgroundBounds, useImage } from './background';
 import {
   hitEndpointHandle,
   hitNavNode,
@@ -375,7 +376,16 @@ function CanvasView({
   const pickable = useMemo(() => withoutLayers(shown, lockedLayers), [shown, lockedLayers]);
   const pickableOf = (f: Floor) => withoutLayers(f, [...hiddenLayers, ...lockedLayers]);
 
-  const localBounds = useMemo(() => floorBounds(floor) ?? FALLBACK_BOUNDS, [floor]);
+  // Tầng chưa vẽ gì mà có ảnh nền (vd. mặt bằng nhập từ bản vẽ) thì căn khung nhìn theo ảnh.
+  const bgImage = useImage(settings.showBackground ? floor.background?.url : undefined);
+  const contentBounds = useMemo(() => floorBounds(floor), [floor]);
+  const fitsBackground = !contentBounds && !!floor.background && !!bgImage;
+  const localBounds = useMemo(
+    () =>
+      contentBounds ??
+      (fitsBackground ? backgroundBounds(floor.background!, bgImage!) : FALLBACK_BOUNDS),
+    [contentBounds, fitsBackground, floor.background, bgImage],
+  );
   const px = pl.position.x;
   const py = pl.position.y;
   const rot = pl.rotation;
@@ -1166,7 +1176,8 @@ function CanvasView({
     <MapStage
       ref={innerRef}
       bounds={bounds}
-      fitKey={campus?.fitKey ?? floor.id}
+      // Ảnh nền tải xong (tầng trống) thì căn lại khung nhìn theo ảnh.
+      fitKey={`${campus?.fitKey ?? floor.id}${fitsBackground ? ':bg' : ''}`}
       background={theme.background}
       panButtons={siteMode ? siteMode.panButtons : panning ? [0, 1] : [1]}
       cursor={siteMode ? siteMode.cursor : cursorStyle}
@@ -1184,7 +1195,7 @@ function CanvasView({
             <Line points={flattenPoints(footprint)} closed fill={theme.floor} opacity={0.92} />
           )}
           {settings.showBackground && floor.background && (
-            <BackgroundImage background={floor.background} />
+            <BackgroundImage background={floor.background} ink={theme.planInk} />
           )}
           {!siteMode && (
             <Grid

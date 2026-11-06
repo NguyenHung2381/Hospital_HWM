@@ -229,7 +229,8 @@ export function buildStairGeometry(
   const holes: Point[][] = [];
 
   for (const { connector, flights } of layouts) {
-    const steps = connector.type === 'stairs' ? 10 : 16;
+    // Dốc: nhiều bậc rất thấp ≈ mặt nghiêng.
+    const steps = connector.type === 'stairs' ? 10 : connector.type === 'ramp' ? 40 : 16;
     for (const flight of flights) {
       const f = flight.frame;
       const len = flightLength(f);

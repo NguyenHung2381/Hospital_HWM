@@ -1,4 +1,12 @@
-import { useEffect, useState, useSyncExternalStore, type RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from 'react';
 import { darkMapTheme, lightMapTheme, type MapTheme } from './theme';
 
 export interface Size {
@@ -66,4 +74,20 @@ export function usePrefersReducedMotion(): boolean {
     () => reducedMotionQuery()?.matches ?? false,
     () => false,
   );
+}
+
+/**
+ * Hàm có tham chiếu cố định, luôn gọi bản `fn` mới nhất — để truyền callback (vd. `onRoomClick`
+ * viết thẳng trong JSX của trang) xuống các lớp bản đồ đã ghi nhớ mà không làm chúng vẽ lại.
+ * Trả về undefined khi `fn` undefined (lớp bản đồ dựa vào đó để bật / tắt tương tác).
+ */
+export function useStableCallback<A extends unknown[], R>(
+  fn: ((...args: A) => R) | undefined,
+): ((...args: A) => R) | undefined {
+  const ref = useRef(fn);
+  useLayoutEffect(() => {
+    ref.current = fn;
+  });
+  const stable = useCallback((...args: A) => ref.current!(...args), []);
+  return fn ? stable : undefined;
 }

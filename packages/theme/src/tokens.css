@@ -1,0 +1,98 @@
+/*
+ * Bộ màu thương hiệu HWN — nguồn duy nhất cho mọi app.
+ * Hằng số tương ứng cho canvas/WebGL (không đọc được CSS variables) nằm ở `./index.ts`;
+ * đổi màu ở đây thì đổi luôn ở đó.
+ */
+:root {
+  /* === MÀU CHỦ ĐẠO: Xanh Tây Ban Nha — RGB 10,155,74 | CMYK 85/15/100/0 === */
+  --color-primary: #0a9b4a; /* Xanh lá chính */
+  --color-primary-dark: #087c3b; /* Xanh lá đậm */
+  --color-primary-light: #4fc47e; /* Xanh lá nhạt */
+  --color-primary-pale: #e7f5ed; /* Xanh lá rất nhạt (nền) */
+
+  /* === MÀU BỔ TRỢ: Hồng tím — RGB 223,9,132 | CMYK 6/100/6/0 === */
+  --color-accent: #df0984; /* Hồng tím */
+  --color-accent-dark: #b3076a; /* Hồng đậm */
+  --color-accent-light: #ee84c3; /* Hồng nhạt */
+
+  --color-secondary: #34b8d8; /* Xanh dương bổ trợ */
+  --color-secondary-dark: #1a9abe;
+
+  /* === MÀU TRUNG TÍNH === */
+  --color-white: #ffffff;
+  --color-gray-50: #f8fafb;
+  --color-gray-100: #f0f4f6;
+  --color-gray-200: #e2e8ec;
+  --color-gray-300: #cbd5dc;
+  --color-gray-400: #9aaab6;
+  --color-gray-500: #6b8090;
+  --color-gray-600: #4a6070;
+  --color-gray-700: #2d4050;
+  --color-gray-800: #1a2a35;
+  --color-gray-900: #0d1820;
+
+  /* === MÀU TRẠNG THÁI === */
+  --color-success: #0a9b4a;
+  --color-warning: #f5a623;
+  --color-error: #e84545;
+  --color-info: #34b8d8;
+
+  /* === TÔNG NHÃN (nền nhạt + chữ đậm) — dùng cho badge, tag, ô trạng thái ===
+     Giá trị giữ nguyên bộ đang dùng ở Badge; đừng viết hex trực tiếp nữa. */
+  --tone-green-bg: #e1f5ea;
+  --tone-green-fg: #085028;
+  --tone-teal-bg: var(--tone-green-bg);
+  --tone-teal-fg: #0f6e3a;
+  --tone-blue-bg: #e6f1fb;
+  --tone-blue-fg: #0c447c;
+  --tone-amber-bg: #faeeda;
+  --tone-amber-fg: #633806;
+  --tone-red-bg: #fcebeb;
+  --tone-red-fg: #791f1f;
+  --tone-gray-bg: #f1efe8;
+  --tone-gray-fg: #444441;
+  --tone-purple-bg: #eeedfe;
+  --tone-purple-fg: #3c3489;
+  --tone-pink-bg: rgba(223, 9, 132, 0.1);
+  --tone-pink-fg: var(--color-accent-dark);
+
+  /* Viền của ô/khung mang tông (nằm giữa -bg và màu đặc) */
+  --tone-green-border: #b6e3ca;
+  --tone-blue-border: #bfd7f2;
+  --tone-amber-border: #f3d6a4;
+  --tone-red-border: #f2bcbc;
+  --tone-purple-border: #cfcbf6;
+  --tone-pink-border: #f6bfdf;
+
+  /* Màu đặc (icon, thanh tiến độ, nền nút) cho tông chưa có màu chính.
+     Xanh lá / đỏ / vàng / hồng dùng --color-primary/-error/-warning/-accent. */
+  --tone-blue-solid: #1a6abd;
+  --tone-purple-solid: #5b4fc4;
+
+  /* === VAI TRÒ GIAO DIỆN — component dùng các biến này, không dùng thẳng thang xám === */
+  --color-primary-contrast: var(--color-white); /* Chữ/icon trên nền primary */
+  --color-on-solid: var(--color-white); /* Chữ/icon trên nền màu đặc (lỗi, cảnh báo, accent…) */
+  --color-bg: var(--color-gray-100);
+  --color-surface: var(--color-white);
+  --color-text: var(--color-gray-900);
+  --color-muted: var(--color-gray-500);
+  --color-border: var(--color-gray-200);
+  /* Chữ mang nghĩa cảnh báo — #f5a623 quá nhạt để làm chữ trên nền sáng. */
+  --color-warning-text: var(--tone-amber-fg);
+  --color-ok: var(--color-success);
+  --color-link: var(--color-primary-dark);
+}
+
+/* Chế độ tối: chỉ đổi vai trò giao diện; màu thương hiệu giữ nguyên. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: var(--color-gray-900);
+    --color-surface: var(--color-gray-800);
+    --color-text: var(--color-gray-100);
+    --color-muted: var(--color-gray-400);
+    --color-border: var(--color-gray-700);
+    --color-warning-text: var(--color-warning);
+    --color-ok: var(--color-primary-light);
+    --color-link: var(--color-primary-light);
+  }
+}

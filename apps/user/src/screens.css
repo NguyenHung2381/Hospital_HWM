@@ -22,7 +22,7 @@ button.back-link {
 }
 
 .warn {
-  color: var(--color-warning);
+  color: var(--color-warning-text);
   margin: 0;
 }
 
@@ -185,7 +185,7 @@ button.back-link {
 
 .chip-active {
   border-color: var(--color-primary);
-  color: var(--color-primary);
+  color: var(--color-link);
   font-weight: 600;
 }
 
@@ -330,20 +330,20 @@ button.back-link {
 /* Mỗi loại thao tác một màu để nhận ra ngay khi liếc qua */
 .step-turn-left,
 .step-turn-right {
-  background: #2563eb;
-  color: #fff;
+  background: var(--tone-blue-solid);
+  color: var(--color-on-solid);
 }
 
 .step-take-elevator,
 .step-take-stairs,
 .step-take-escalator {
-  background: #7c3aed;
-  color: #fff;
+  background: var(--tone-purple-solid);
+  color: var(--color-on-solid);
 }
 
 .step-arrive {
-  background: #dc2626;
-  color: #fff;
+  background: var(--color-error);
+  color: var(--color-on-solid);
 }
 
 /* Mũi tên rẽ khẽ "hất" theo hướng rẽ */
@@ -418,7 +418,7 @@ button.back-link {
 .step-distance {
   font-size: 0.95rem;
   font-weight: 600;
-  color: var(--color-primary);
+  color: var(--color-link);
 }
 
 .step-next {
@@ -455,7 +455,7 @@ button.back-link {
 
 .button-active {
   border-color: var(--color-primary);
-  color: var(--color-primary);
+  color: var(--color-link);
 }
 
 .follow-hint {
@@ -520,7 +520,7 @@ button.back-link {
   position: fixed;
   inset: 0;
   background: #000;
-  color: #fff;
+  color: var(--color-white);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -557,7 +557,7 @@ button.back-link {
   flex-shrink: 0;
   border-radius: 50%;
   background: rgb(0 0 0 / 0.45);
-  color: #fff;
+  color: var(--color-white);
 }
 
 .camera-status {
@@ -588,7 +588,7 @@ button.back-link {
 .camera-controls .button {
   background: rgb(0 0 0 / 0.45);
   border-color: rgb(255 255 255 / 0.3);
-  color: #fff;
+  color: var(--color-white);
   font-size: 0.9rem;
   padding: 0 12px;
 }
@@ -597,13 +597,13 @@ button.back-link {
   width: 76px;
   height: 76px;
   border-radius: 50%;
-  border: 5px solid #fff;
+  border: 5px solid var(--color-white);
   background: rgb(255 255 255 / 0.3);
   cursor: pointer;
 }
 
 .shutter:active:not(:disabled) {
-  background: #fff;
+  background: var(--color-white);
 }
 
 .shutter:disabled {
@@ -638,7 +638,7 @@ button.back-link {
   height: 44px;
   border-radius: 50%;
   border: 4px solid rgb(255 255 255 / 0.35);
-  border-top-color: #fff;
+  border-top-color: var(--color-white);
   animation: spin 0.9s linear infinite;
 }
 
@@ -731,8 +731,8 @@ button.back-link {
 }
 
 .step-enter-room {
-  background: #d97706;
-  color: #fff;
+  background: var(--color-warning);
+  color: var(--tone-amber-fg);
 }
 
 @keyframes place-in {
@@ -825,7 +825,7 @@ button.back-link {
 
 .campus-step svg {
   flex: none;
-  color: var(--color-primary);
+  color: var(--color-link);
 }
 
 .campus-step.outdoor svg {

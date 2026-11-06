@@ -17,6 +17,7 @@ export const CONNECTOR_LABEL: Record<ConnectorType, string> = {
   elevator: 'Thang máy',
   stairs: 'Thang bộ',
   escalator: 'Thang cuốn',
+  ramp: 'Dốc',
 };
 
 export const ELEVATOR_KINDS: { value: ElevatorKind; label: string }[] = [

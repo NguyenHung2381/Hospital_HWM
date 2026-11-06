@@ -72,7 +72,8 @@ export interface Opening {
   opensOtherSide?: boolean;
 }
 
-export type ConnectorType = 'elevator' | 'stairs' | 'escalator';
+/** `ramp`: dốc cho người đi bộ / xe lăn / xe đẩy giữa hai cao độ sàn (hoặc dốc xe xuống tầng hầm). */
+export type ConnectorType = 'elevator' | 'stairs' | 'escalator' | 'ramp';
 
 export type ConnectorDirection = 'up' | 'down' | 'both';
 
@@ -373,6 +374,7 @@ export type RouteInstructionType =
   | 'take-elevator'
   | 'take-stairs'
   | 'take-escalator'
+  | 'take-ramp'
   | 'enter-room'
   | 'arrive';
 

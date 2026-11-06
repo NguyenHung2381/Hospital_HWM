@@ -13,6 +13,7 @@
     "@hwn/api-client": "*",
     "@hwn/map-core": "*",
     "@hwn/map-render": "*",
+    "@hwn/theme": "*",
     "@tanstack/react-query": "^5.104.1",
     "immer": "^11.1.18",
     "react": "^19.3.0",

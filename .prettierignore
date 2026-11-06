@@ -3,3 +3,7 @@ dist
 coverage
 package-lock.json
 **/public/mockServiceWorker.js
+
+# Dữ liệu sinh từ bản vẽ PDF (scripts/plans)
+packages/map-core/src/sample/plans/
+scripts/plans/result.json

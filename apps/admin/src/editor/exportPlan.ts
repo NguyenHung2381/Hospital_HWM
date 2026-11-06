@@ -31,6 +31,7 @@ import {
   withoutLayers,
 } from './ops';
 import type { LayerId } from './types';
+import { palette } from '@hwn/theme';
 
 /** Lề quanh bản vẽ và chiều cao dải tiêu đề phía dưới (m). */
 const MARGIN = 2;
@@ -245,9 +246,9 @@ export function floorToSvg(
     text({ x: sx, y: ty + 0.5 }, '0', 0.3),
     text({ x: sx + 5, y: ty + 0.5 }, '5 m', 0.3),
     `<g transform="translate(${n(sx - 1.5)} ${n(ty)}) rotate(${n(building.northAngle ?? 0)})">` +
-      `<polygon points="0,-0.7 0.3,0.3 0,0.1 -0.3,0.3" fill="#dc2626"/>` +
+      `<polygon points="0,-0.7 0.3,0.3 0,0.1 -0.3,0.3" fill="${palette.error}"/>` +
       `</g>`,
-    text({ x: sx - 1.5, y: ty - 1 }, 'B', 0.35, { bold: true, fill: '#dc2626' }),
+    text({ x: sx - 1.5, y: ty - 1 }, 'B', 0.35, { bold: true, fill: palette.error }),
   );
 
   const svg =

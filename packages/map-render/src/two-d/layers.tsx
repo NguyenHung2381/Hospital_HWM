@@ -30,7 +30,8 @@ import { LANDMARK_STYLE } from '../core/landmarks';
 import { usePrefersReducedMotion } from '../core/hooks';
 import { flattenPoints, pointAlong, slicePolyline, type FloorRouteSegment } from '../core/route';
 import { withAlpha, type MapTheme } from '../core/theme';
-import { layoutWall, segmentQuad, wallKindOf } from '../core/walls';
+import { layoutWall, wallKindOf } from '../core/walls';
+import { orientPositive, segmentOutline, wallJoints } from '../core/wallJoints';
 import type { RouteHighlight, RouteProgress } from '../types';
 import { usePx, useViewportRotation, useViewportScale } from './MapStage';
 
@@ -251,33 +252,139 @@ function hatchQuad(
   c.restore();
 }
 
+/** Vẽ các đa giác vào cùng một path (đã cùng chiều) — tô một lần nên chỗ hai đa giác giáp nhau không lộ khe. */
+function tracePolygons(c: CanvasRenderingContext2D, polygons: readonly (readonly Point[])[]) {
+  c.beginPath();
+  for (const poly of polygons) {
+    poly.forEach((p, i) => (i ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y)));
+    c.closePath();
+  }
+}
+
+/**
+ * Thân tường đặc cùng một loại, tô chung một lần: các đoạn tường nối vát khít nhau thành một khối
+ * liền (không có đường khe mờ ở mối nối, vách bán trong suốt không đậm màu ở góc).
+ */
+function WallMass({
+  kind,
+  polygons,
+  theme,
+}: {
+  kind: WallKind;
+  polygons: readonly (readonly Point[])[];
+  theme: MapTheme;
+}) {
+  const box = useMemo(() => boundsOf(polygons.flat()), [polygons]);
+  if (!box || polygons.length === 0) return null;
+  return (
+    <Shape
+      listening={false}
+      sceneFunc={(ctx, shape) => {
+        const c = ctx._context;
+        const px = 1 / Math.max(Math.abs(shape.getAbsoluteScale().x), 1e-6);
+        c.save();
+        tracePolygons(c, polygons);
+        switch (kind) {
+          case 'brick':
+            c.fillStyle = theme.wall;
+            c.fill();
+            break;
+          case 'partition':
+            c.fillStyle = withAlpha(theme.wall, 0.55);
+            c.fill();
+            break;
+          case 'concrete': {
+            c.fillStyle = theme.wall;
+            c.fill();
+            c.clip();
+            const h = box.maxY - box.minY;
+            const spacing = 0.12;
+            c.beginPath();
+            for (let x = box.minX - h; x < box.maxX; x += spacing) {
+              c.moveTo(x, box.maxY);
+              c.lineTo(x + h, box.minY);
+            }
+            c.strokeStyle = withAlpha(theme.floor, 0.6);
+            c.lineWidth = spacing * 0.3;
+            c.stroke();
+            break;
+          }
+          case 'glass':
+            c.fillStyle = withAlpha(theme.window, 0.35);
+            c.fill();
+            c.strokeStyle = theme.window;
+            c.lineWidth = 1.5 * px;
+            c.lineJoin = 'miter';
+            c.stroke();
+            break;
+          case 'railing':
+            c.fillStyle = withAlpha(theme.wall, 0.12);
+            c.fill();
+            c.strokeStyle = theme.wall;
+            c.lineWidth = px;
+            c.setLineDash([0.2, 0.12]);
+            c.stroke();
+            break;
+        }
+        c.restore();
+      }}
+    />
+  );
+}
+
+const WALL_KIND_ORDER: readonly WallKind[] = ['railing', 'glass', 'partition', 'brick', 'concrete'];
+
 export function Walls({ floor, theme }: { floor: Floor; theme: MapTheme }) {
-  const shapes = useMemo(() => {
+  const { masses, shapes } = useMemo(() => {
     const openings = new Map(floor.openings.map((o) => [o.id, o]));
-    return floor.walls.flatMap((wall) =>
-      layoutWall(wall, floor.openings).map((segment, i) => ({
-        key: `${wall.id}:${i}`,
-        segment,
-        thickness: wall.thickness,
-        wallKind: wallKindOf(wall),
-        opening: segment.openingId ? openings.get(segment.openingId) : undefined,
-        corners: segmentQuad(wall, segment),
-      })),
+    // Gom ô cửa theo tường để layoutWall không lọc cả danh sách cho từng tường (tầng nghìn tường).
+    const openingsOf = new Map<Id, Opening[]>();
+    for (const o of floor.openings) {
+      const list = openingsOf.get(o.wallId);
+      if (list) list.push(o);
+      else openingsOf.set(o.wallId, [o]);
+    }
+    const joints = wallJoints(floor.walls);
+    const masses = new Map<WallKind, Point[][]>();
+    const shapes = floor.walls.flatMap((wall) =>
+      layoutWall(wall, openingsOf.get(wall.id) ?? []).flatMap((segment, i) => {
+        const corners = segmentOutline(wall, segment, joints.get(wall.id));
+        if (segment.kind === 'solid') {
+          const kind = wallKindOf(wall);
+          const list = masses.get(kind);
+          if (list) list.push(orientPositive(corners));
+          else masses.set(kind, [orientPositive(corners)]);
+          return [];
+        }
+        return [
+          {
+            key: `${wall.id}:${i}`,
+            segment,
+            thickness: wall.thickness,
+            opening: segment.openingId ? openings.get(segment.openingId) : undefined,
+            corners,
+          },
+        ];
+      }),
     );
+    return { masses, shapes };
   }, [floor.walls, floor.openings]);
 
   return (
     <Group listening={false}>
-      {shapes.map(({ key, segment, thickness, wallKind, opening, corners }) => {
-        const quad = flattenPoints(corners);
+      {WALL_KIND_ORDER.map((kind) => {
+        const polygons = masses.get(kind);
+        return polygons ? (
+          <WallMass key={kind} kind={kind} polygons={polygons} theme={theme} />
+        ) : null;
+      })}
+      {shapes.map(({ key, segment, thickness, opening, corners }) => {
         switch (segment.kind) {
-          case 'solid':
-            return <WallBody key={key} kind={wallKind} corners={corners} theme={theme} />;
           case 'window':
             return (
               <Group key={key}>
                 <Line
-                  points={quad}
+                  points={flattenPoints(corners)}
                   closed
                   fill={theme.floor}
                   stroke={theme.wall}
@@ -314,6 +421,8 @@ export function Walls({ floor, theme }: { floor: Floor; theme: MapTheme }) {
                 strokeScaleEnabled={false}
               />
             );
+          default:
+            return null;
         }
       })}
     </Group>
@@ -335,6 +444,8 @@ function connectorSymbol(connector: Connector): number[][] {
       [minX, maxY, maxX, minY],
     ];
   }
+  // Dốc có thể cong (đa giác bất kỳ): không vẽ vạch bậc, chỉ tô nền + nhãn.
+  if (connector.type === 'ramp') return [];
   const step = connector.type === 'stairs' ? 0.35 : 0.25;
   const horizontal = maxX - minX >= maxY - minY; // bậc chạy dọc theo cạnh dài
   const lines: number[][] = [];

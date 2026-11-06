@@ -30,6 +30,7 @@ import { FloorPlan2D } from '../two-d/FloorPlan2D';
 import type { MapStageHandle } from '../two-d/MapStage';
 import type { MapLocation, MapMode, RouteHighlight, RouteProgress } from '../types';
 import './MapViewer.css';
+import { palette } from '@hwn/theme';
 
 // Tách three.js (~1 MB) ra chunk riêng, chỉ tải khi người dùng chuyển sang 3D.
 const Building3D = lazy(() =>
@@ -321,7 +322,7 @@ export function MapViewer({
         >
           <svg viewBox="-12 -12 24 24" width="28" height="28" aria-hidden>
             <g transform={`rotate(${northOnScreen})`}>
-              <path d="M0 -10 L4 0 L-4 0 Z" fill="#dc2626" />
+              <path d="M0 -10 L4 0 L-4 0 Z" fill={palette.error} />
               <path d="M0 10 L4 0 L-4 0 Z" fill="currentColor" opacity="0.45" />
             </g>
           </svg>

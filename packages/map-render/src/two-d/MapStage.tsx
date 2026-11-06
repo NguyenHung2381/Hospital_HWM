@@ -87,34 +87,40 @@ export interface MapStageProps {
   ref?: Ref<MapStageHandle>;
 }
 
-interface ViewportValue {
-  /** Pixel trên mỗi mét ở mức zoom hiện tại. */
-  scale: number;
-  /** Góc xoay bản đồ (độ). */
-  rotation: number;
-  /** Vùng thế giới (m) đang nhìn thấy. */
-  rect: BBox;
-}
+/*
+ * Vùng nhìn chia thành 3 context riêng để mỗi lớp chỉ vẽ lại khi đúng giá trị nó dùng thay đổi:
+ * kéo bản đồ chỉ đổi `rect` (lưới vẽ lại), không làm vẽ lại mọi lớp dùng tỉ lệ zoom (nhãn, khuôn
+ * viên… — hàng nghìn hình).
+ */
 
-const ViewportContext = createContext<ViewportValue>({
-  scale: 1,
-  rotation: 0,
-  rect: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
-});
+/** Pixel trên mỗi mét ở mức zoom hiện tại. */
+const ScaleContext = createContext(1);
+/** Góc xoay bản đồ (độ). */
+const RotationContext = createContext(0);
+/** Vùng thế giới (m) đang nhìn thấy. */
+const RectContext = createContext<BBox>({ minX: 0, minY: 0, maxX: 0, maxY: 0 });
+
+/**
+ * Tỉ lệ zoom báo cho các lớp (`usePx` / `useViewportScale`) chỉ đổi khi tỉ lệ thật lệch quá chừng
+ * này (theo log2, ~3%). Nét vẽ, nhãn cỡ pixel lệch ≤ 3% không thấy được, còn zoom lệch rất ít
+ * (vd. hai bước chỉ đường liền nhau, mỗi nấc lăn chuột nhỏ) không làm vẽ lại cả nghìn hình của
+ * khuôn viên, nhãn…
+ */
+const SCALE_TOLERANCE_LOG2 = 1 / 24;
 
 /** Quy đổi kích thước pixel trên màn hình sang mét ở mức zoom hiện tại. */
 export function usePx(): (px: number) => number {
-  const { scale } = useContext(ViewportContext);
+  const scale = useContext(ScaleContext);
   return useCallback((px: number) => px / scale, [scale]);
 }
 
-export const useViewportScale = () => useContext(ViewportContext).scale;
+export const useViewportScale = () => useContext(ScaleContext);
 
 /** Góc xoay bản đồ (độ) — nhãn/biểu tượng xoay ngược lại góc này để luôn đứng thẳng. */
-export const useViewportRotation = () => useContext(ViewportContext).rotation;
+export const useViewportRotation = () => useContext(RotationContext);
 
 /** Vùng thế giới (m) đang hiển thị — dùng để chỉ vẽ phần nhìn thấy (vd. lưới). */
-export const useViewRect = () => useContext(ViewportContext).rect;
+export const useViewRect = () => useContext(RectContext);
 
 /** Phép đặt hệ trục con: gốc tại `position`, xoay `rotation` độ (chiều kim đồng hồ). */
 export interface FrameTransform {
@@ -144,28 +150,28 @@ export function LocalFrame({
   opacity?: number;
   children: ReactNode;
 }) {
-  const parent = useContext(ViewportContext);
+  const parentRotation = useContext(RotationContext);
+  const parentRect = useContext(RectContext);
   const { position, rotation } = frame;
-  const value = useMemo<ViewportValue>(() => {
-    const r = parent.rect;
+  const rect = useMemo(() => {
+    const r = parentRect;
     const toLocal = (p: Point) =>
       rotatePoint({ x: p.x - position.x, y: p.y - position.y }, ORIGIN, -rotation);
-    return {
-      scale: parent.scale,
-      rotation: parent.rotation + rotation,
-      rect: boundsOf(
-        [
-          { x: r.minX, y: r.minY },
-          { x: r.maxX, y: r.minY },
-          { x: r.maxX, y: r.maxY },
-          { x: r.minX, y: r.maxY },
-        ].map(toLocal),
-      )!,
-    };
-  }, [parent, position.x, position.y, rotation]);
+    return boundsOf(
+      [
+        { x: r.minX, y: r.minY },
+        { x: r.maxX, y: r.minY },
+        { x: r.maxX, y: r.maxY },
+        { x: r.minX, y: r.maxY },
+      ].map(toLocal),
+    )!;
+  }, [parentRect, position.x, position.y, rotation]);
+  // Tỉ lệ zoom không đổi trong hệ trục con: dùng thẳng context của cha.
   return (
     <Group x={position.x} y={position.y} rotation={rotation} opacity={opacity}>
-      <ViewportContext.Provider value={value}>{children}</ViewportContext.Provider>
+      <RotationContext.Provider value={parentRotation + rotation}>
+        <RectContext.Provider value={rect}>{children}</RectContext.Provider>
+      </RotationContext.Provider>
     </Group>
   );
 }
@@ -225,7 +231,7 @@ export function MapStage({
   /** Khung nhìn đích khi đang trượt tới vùng `focus`. */
   const [glideTo, setGlideTo] = useState<ViewTransform | null>(null);
   if (bounds && size.width > 0 && size.height > 0) {
-    if (fitted?.key !== key || fitted.width !== size.width || fitted.height !== size.height) {
+    if (fitted?.key !== key) {
       setFitted({ key, focusKey, width: size.width, height: size.height });
       setGlideTo(null);
       setView(
@@ -233,10 +239,24 @@ export function MapStage({
           ? centeredTransform(focus, focusPadding)
           : { ...fitTransform(bounds, size.width, size.height, padding, rotation), rotation },
       );
+    } else if (fitted.width !== size.width || fitted.height !== size.height) {
+      // Khung đổi kích thước (thanh hướng dẫn cao / thấp hơn, thanh địa chỉ điện thoại ẩn / hiện…):
+      // giữ nguyên điểm đang ở giữa khung và mức zoom thay vì căn lại từ đầu (bản đồ nhảy, mất mức
+      // zoom người dùng đã chỉnh). Đang trượt / vừa đổi bước thì tính lại đích trượt theo khung mới.
+      setFitted({ ...fitted, focusKey, width: size.width, height: size.height });
+      if (focus && (glideTo || fitted.focusKey !== focusKey)) {
+        setGlideTo(centeredTransform(focus, focusPadding));
+      } else {
+        const center = screenToWorld(view, { x: fitted.width / 2, y: fitted.height / 2 });
+        setView(
+          centeredView(center, view.scale, view.rotation ?? rotation, size.width, size.height),
+        );
+      }
     } else if (fitted.focusKey !== focusKey) {
       setFitted({ ...fitted, focusKey });
       if (focus) setGlideTo(centeredTransform(focus, focusPadding));
-    } else if ((view.rotation ?? 0) !== rotation) {
+    } else if ((view.rotation ?? 0) !== rotation && !glideTo) {
+      // Đang trượt thì mỗi khung trượt đã lấy góc xoay mới nhất.
       setView(rotateAt(view, screenCenter, rotation));
     }
   }
@@ -253,20 +273,39 @@ export function MapStage({
       : view;
   }, [view]);
 
-  // Trượt mượt tới `glideTo`. Người dùng kéo/zoom thì dừng ngay.
+  /*
+   * Trượt mượt tới `glideTo`: dời / zoom thẳng Konva stage mỗi khung hình (chỉ Konva vẽ lại), KHÔNG
+   * đổi state React — nếu không, mỗi khung hình React phải vẽ lại mọi lớp phụ thuộc tỉ lệ zoom
+   * (nhãn, cả khuôn viên…) và bản đồ bị khựng khi chuyển bước. Hết đoạn trượt mới ghi khung nhìn
+   * vào state một lần. Người dùng kéo / zoom thì dừng ngay.
+   */
   const glideFrame = useRef(0);
-  const stopGlide = () => cancelAnimationFrame(glideFrame.current);
+  /** Khung nhìn đang hiển thị khi state `view` chưa theo kịp (đang trượt). */
+  const shown = useRef<ViewTransform | null>(null);
+  /** Dừng trượt, ghi khung nhìn đang hiển thị vào state; trả về khung nhìn đó (nếu đang trượt). */
+  /** Đoạn trượt đã bị người dùng dừng — không được bắt đầu nếu effect của nó chạy muộn. */
+  const cancelledGlide = useRef<ViewTransform | null>(null);
+  const stopGlide = (): ViewTransform | null => {
+    cancelAnimationFrame(glideFrame.current);
+    const current = shown.current;
+    shown.current = null;
+    if (current) setView(current);
+    if (glideTo) {
+      cancelledGlide.current = glideTo;
+      setGlideTo(null);
+    }
+    return current;
+  };
   useEffect(() => {
-    if (!glideTo) return;
+    if (!glideTo || cancelledGlide.current === glideTo) return;
     const stage = stageRef.current;
-    const from = stage
-      ? { x: stage.x(), y: stage.y(), scale: stage.scaleX(), rotation: stage.rotation() }
-      : null;
     const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    if (!from || reduced) {
+    if (!stage || reduced) {
       setView(glideTo);
+      setGlideTo(null);
       return;
     }
+    const from = { x: stage.x(), y: stage.y(), scale: stage.scaleX(), rotation: stage.rotation() };
     const started = performance.now();
     const tick = (now: number) => {
       const p = Math.min(1, (now - started) / GLIDE_MS);
@@ -278,17 +317,37 @@ export function MapStage({
       const b = screenToWorld(glideTo, center);
       const w = { x: lerpNum(a.x, b.x, e), y: lerpNum(a.y, b.y, e) };
       // Góc xoay lấy giá trị mới nhất: la bàn có thể đổi trong lúc đang trượt.
-      setView(centeredView(w, scale, rotationRef.current, size.width, size.height));
-      if (p < 1) glideFrame.current = requestAnimationFrame(tick);
+      const v = centeredView(w, scale, rotationRef.current, size.width, size.height);
+      if (p < 1) {
+        shown.current = v;
+        stage.setAttrs({
+          x: v.x,
+          y: v.y,
+          scaleX: v.scale,
+          scaleY: v.scale,
+          rotation: v.rotation ?? 0,
+        });
+        stage.batchDraw();
+        glideFrame.current = requestAnimationFrame(tick);
+      } else {
+        shown.current = null;
+        setView(v);
+        setGlideTo(null);
+      }
     };
     glideFrame.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(glideFrame.current);
+    return () => {
+      cancelAnimationFrame(glideFrame.current);
+      // Bị thay bằng đoạn trượt mới / căn lại khung: khung nhìn mới do nơi đó quyết định.
+      shown.current = null;
+    };
   }, [glideTo]);
 
   useImperativeHandle(
     ref,
     () => ({
       fit: () => {
+        stopGlide();
         if (bounds && size.width && size.height) {
           setView({
             ...fitTransform(bounds, size.width, size.height, padding, rotation),
@@ -297,16 +356,19 @@ export function MapStage({
         }
       },
       fitBounds: (b, pad = 60) => {
+        stopGlide();
         if (!size.width || !size.height) return;
         const s = clampScale(fitTransform(b, size.width, size.height, pad, rotation).scale);
         const c = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
         setView(centeredView(c, s, rotation, size.width, size.height));
       },
       zoomBy: (factor) => {
+        stopGlide();
         const v = currentView();
         setView(zoomAt(v, { x: size.width / 2, y: size.height / 2 }, clampScale(v.scale * factor)));
       },
       centerOn: (p, scale) => {
+        stopGlide();
         const s = clampScale(scale ?? currentView().scale);
         setView(centeredView(p, s, rotation, size.width, size.height));
       },
@@ -320,7 +382,7 @@ export function MapStage({
       },
       getTransform: currentView,
     }),
-    [bounds, size.width, size.height, padding, rotation, clampScale, currentView],
+    [bounds, size.width, size.height, padding, rotation, clampScale, currentView, glideTo],
   );
 
   const handleWheel = (e: KonvaEventObject<WheelEvent>) => {
@@ -364,7 +426,7 @@ export function MapStage({
   const handleDragStart = (e: KonvaEventObject<DragEvent>) => {
     const stage = stageRef.current;
     if (e.target !== stage) return;
-    stopGlide();
+    const glided = stopGlide();
     const evt: Event | undefined = e.evt;
     // Cảm ứng luôn được kéo (1 ngón = pan). Chuột: chỉ các nút trong panButtons.
     if (
@@ -376,7 +438,8 @@ export function MapStage({
     const allowed = panButtons.reduce((mask, b) => mask | (BUTTON_MASK[b] ?? 0), 0);
     if ((evt.buttons & allowed) === 0) {
       stage.stopDrag();
-      stage.position({ x: view.x, y: view.y });
+      const v = glided ?? view;
+      stage.position({ x: v.x, y: v.y });
     }
   };
 
@@ -403,11 +466,18 @@ export function MapStage({
       if (handler && p) handler(p, e.evt);
     };
 
-  const viewport = useMemo<ViewportValue>(
-    () => ({
-      scale: view.scale,
-      rotation: view.rotation ?? 0,
-      rect: boundsOf(
+  // Tỉ lệ báo cho các lớp: giữ nguyên tới khi tỉ lệ thật lệch quá SCALE_TOLERANCE_LOG2.
+  const [layerScale, setLayerScale] = useState(view.scale);
+  if (
+    view.scale > 0 &&
+    (layerScale <= 0 || Math.abs(Math.log2(view.scale / layerScale)) > SCALE_TOLERANCE_LOG2)
+  ) {
+    setLayerScale(view.scale);
+  }
+
+  const viewRect = useMemo(
+    () =>
+      boundsOf(
         [
           { x: 0, y: 0 },
           { x: size.width, y: 0 },
@@ -415,7 +485,6 @@ export function MapStage({
           { x: 0, y: size.height },
         ].map((p) => screenToWorld(view, p)),
       )!,
-    }),
     [view, size.width, size.height],
   );
 
@@ -459,7 +528,11 @@ export function MapStage({
           onPointerMove={handlePointerMove}
           onPointerLeave={() => onWorldPointerMove?.(null)}
         >
-          <ViewportContext.Provider value={viewport}>{children}</ViewportContext.Provider>
+          <ScaleContext.Provider value={layerScale}>
+            <RotationContext.Provider value={view.rotation ?? 0}>
+              <RectContext.Provider value={viewRect}>{children}</RectContext.Provider>
+            </RotationContext.Provider>
+          </ScaleContext.Provider>
         </Stage>
       )}
     </div>
